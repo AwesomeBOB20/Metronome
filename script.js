@@ -4,6 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
   const root = $('#metronome'); if (!root) return;
 
+  /* prevent double init if the script is included twice */
+  if (window.__METRO_BOUND__) return;
+  window.__METRO_BOUND__ = true;
+
   // Elements
   const playBtn = $('#metroPlay');
   const tapBtn = $('#tapTempoBtn');
@@ -40,24 +44,25 @@ document.addEventListener('DOMContentLoaded', () => {
   function openPicker(trigger, selectEl, titleText){
     activeSelect = selectEl;
     activeTrigger = trigger;
-    pickerTitle.textContent = titleText || 'Select';
-    pickerSearch.value = '';
+    if (pickerTitle) pickerTitle.textContent = titleText || 'Select';
+    if (pickerSearch) pickerSearch.value = '';
     renderPickerList('');
-    pickerRoot.hidden = false;
+    if (pickerRoot) pickerRoot.hidden = false;
     document.body.classList.add('modal-open');
-    pickerSearch.focus({preventScroll:true});
+    pickerSearch && pickerSearch.focus({preventScroll:true});
   }
 
   function closePicker(){
-    pickerRoot.hidden = true;
+    if (pickerRoot) pickerRoot.hidden = true;
     document.body.classList.remove('modal-open');
     activeSelect = null; activeTrigger = null;
   }
 
   function renderPickerList(filter){
+    if (!pickerList || !activeSelect) return;
     pickerList.innerHTML = '';
     const opts = [...activeSelect.options];
-    const q = filter.trim().toLowerCase();
+    const q = (filter||'').trim().toLowerCase();
     opts.forEach((opt, idx)=>{
       const txt = opt.text || opt.value;
       if (q && !txt.toLowerCase().includes(q)) return;
@@ -75,12 +80,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  pickerClose.addEventListener('click', closePicker);
-  pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
+  pickerClose && pickerClose.addEventListener('click', closePicker);
+  pickerSearch && pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
   document.addEventListener('keydown', (e)=>{
-    if (!pickerRoot.hidden && e.key === 'Escape') closePicker();
+    if (pickerRoot && !pickerRoot.hidden && e.key === 'Escape') closePicker();
   });
-  pickerRoot.addEventListener('click', (e)=>{ if (e.target === pickerRoot) closePicker(); });
+  pickerRoot && pickerRoot.addEventListener('click', (e)=>{ if (e.target === pickerRoot) closePicker(); });
 
   function attachPicker(trigger){
     const selectId = trigger.getAttribute('data-picker');
@@ -315,50 +320,60 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // +/- stacks around the BPM number
   function stepBpm(delta){ setBpmUI(getBpm() + delta); if (isRunning && getBpm()===0) stop(); }
-  bpmDec1Btn.addEventListener('click', ()=>stepBpm(-1));
-  bpmDec5Btn.addEventListener('click', ()=>stepBpm(-5));
-  bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
-  bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
+  bpmDec1Btn && bpmDec1Btn.addEventListener('click', ()=>stepBpm(-1));
+  bpmDec5Btn && bpmDec5Btn.addEventListener('click', ()=>stepBpm(-5));
+  bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
+  bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
 
   // Listeners
-  playBtn.addEventListener('click', e=>{ e.preventDefault(); isRunning ? stop() : start(); });
-  tapBtn.addEventListener('click', onTap);
+  playBtn && playBtn.addEventListener('click', e=>{ e.preventDefault(); isRunning ? stop() : start(); });
+  tapBtn && tapBtn.addEventListener('click', onTap);
 
-  bpmRange.addEventListener('input', e=>{ setBpmUI(e.target.value); if (isRunning && getBpm()===0) stop(); });
-  bpmInput.addEventListener('input', e=> setBpmUI(e.target.value||0));
+  bpmRange && bpmRange.addEventListener('input', e=>{ setBpmUI(e.target.value); if (isRunning && getBpm()===0) stop(); });
+  bpmInput && bpmInput.addEventListener('input', e=> setBpmUI(e.target.value||0));
 
-  [tsNum, tsDen, subdivSel].forEach(el=> el.addEventListener('change', ()=>{
+  [tsNum, tsDen, subdivSel].forEach(el=> el && el.addEventListener('change', ()=>{
     // sync trigger text to selected option
-    if (el === tsNum) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
-    if (el === tsDen) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
-    if (el === subdivSel) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    if (el === tsNum && tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    if (el === tsDen && tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    if (el === subdivSel && subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
 
     beatStates = defaultBeatStates(); renderLights(); softReset();
   }));
-  soundSel.addEventListener('change', ()=>{
-    soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+  soundSel && soundSel.addEventListener('change', ()=>{
+    if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
   });
 
-  // Keyboard: Space toggles; Up/Down arrows change BPM (Shift = ±5)
+  // Keyboard: Space toggles; Up/Down/Left/Right change BPM (Shift = ±5)
   document.addEventListener('keydown', (e)=>{
-    // If picker is open, only Esc is handled elsewhere; ignore arrow/space here
-    if (!pickerRoot.hidden) return;
+    if (pickerRoot && !pickerRoot.hidden) return; // ignore when picker open
 
     const tag = (e.target.tagName||'').toLowerCase();
     const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
     if (typing) return;
 
     if (e.code === 'Space' && !e.altKey && !e.ctrlKey && !e.metaKey){
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();
       isRunning ? stop() : start();
       return;
     }
 
-    if (e.key === 'ArrowUp'){
-      e.preventDefault();
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation();
       stepBpm(e.shiftKey ? +5 : +1);
-    } else if (e.key === 'ArrowDown'){
-      e.preventDefault();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? -5 : -1);
+    }
+  });
+
+  // If slider is focused, handle arrows locally to avoid native range step + our global handler conflicts
+  bpmRange && bpmRange.addEventListener('keydown', e=>{
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation();
       stepBpm(e.shiftKey ? -5 : -1);
     }
   });
@@ -367,23 +382,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1', sound:'beep' };
   function applyDefaultsOnLoad(){
     setBpmUI(defaults.bpm);
-    tsNum.value = defaults.tsNum;
-    tsDen.value = defaults.tsDen;
-    subdivSel.value = defaults.subdiv;
-    soundSel.value = defaults.sound;
-    updateSliderFill(bpmRange);
+    if (tsNum) tsNum.value = defaults.tsNum;
+    if (tsDen) tsDen.value = defaults.tsDen;
+    if (subdivSel) subdivSel.value = defaults.subdiv;
+    if (soundSel) soundSel.value = defaults.sound;
+    if (bpmRange) updateSliderFill(bpmRange);
     beatStates = defaultBeatStates();
     renderLights();
 
     // Sync trigger texts
-    tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
-    tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
-    subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
-    soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+    if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
   }
   [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
   window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
 
   applyDefaultsOnLoad();
 });
-
