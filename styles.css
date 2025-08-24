@@ -124,18 +124,18 @@ body{
   }
   .tempo-row.transport-eq .btn,
   .tempo-row.transport-eq .tempo-input{
-    width:100%; min-width:0;      /* avoid spilling out of card padding */
+    width:100%; min-width:0;
   }
-  #metroPlay, #tapTempoBtn{ min-width:0; } /* allow shrink on mobile */
+  #metroPlay, #tapTempoBtn{ min-width:0; }
   .tempo-row.transport-eq #metroBpmRange{
     grid-column:1 / -1; grid-row:2; min-width:0;
   }
 }
 
-/* === Lights === */
+/* === Lights (main row) === */
 .metro-lights{
   display:grid; grid-auto-flow:column; grid-auto-columns:minmax(28px,1fr);
-  gap:20px; width:100%; margin:20px 0;
+  gap:20px; width:100%; margin:16px 0; /* requested 16px */
 }
 .metro-light{
   height:48px; border:3px solid var(--black); border-radius:16px; background:var(--gray-1);
@@ -146,12 +146,41 @@ body{
 .metro-light.is-muted{  background:var(--blue-dim); opacity:1; }
 .metro-light.is-hit{ transform:scaleY(1.15); }
 
+/* === Subdivision lights container (never overflow; up to two balanced rows, centered) === */
+.metro-lights--subs{
+  display:flex;
+  flex-direction:column;
+  gap:20px;               /* requested subs gap */
+  width:100%;
+  margin:10px 0;
+}
+.metro-lights--subs .sub-row{
+  display:grid;
+  grid-auto-flow:column;
+  gap:20px;               /* keep spacing consistent within a row */
+  width:max-content;      /* row shrinks to its content so centering works */
+  margin-inline:auto;     /* center row when narrower than container */
+}
+
+/* Sub light visuals: tri-state; hit only animates (no color swap) */
+.sub-light{
+  height:16px;
+  border:3px solid var(--black);
+  border-radius:16px;
+  background:var(--orange);           /* default look (on) */
+  transition:transform .05s linear, background .05s linear;
+  cursor:pointer;
+}
+.sub-light.is-on{      background:var(--orange); }   /* normal */
+.sub-light.is-accent{  background:var(--purple); }   /* accent */
+.sub-light.is-muted{   background:var(--blue-dim); } /* none (same as main) */
+.sub-light.is-hit{ transform:scaleY(1.15); }
+
 /* === Config rows (card #2) — DESKTOP one line, items fill their columns === */
 .control-lines{ display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:center; }
 .control-line{ display:flex; align-items:center; gap:20px; }
 .control-inputs{ display:flex; align-items:center; gap:20px; }
 
-/* Desktop: 3 columns in a single row; inputs fill edge-to-edge */
 @media (min-width:701px){
   .control-lines{
     display:grid;
@@ -162,7 +191,7 @@ body{
   }
   .control-line{
     display:grid;
-    grid-template-columns: auto 1fr; /* label | inputs */
+    grid-template-columns: auto 1fr;
     gap:12px;
     align-items:center;
     width:100%;
@@ -171,13 +200,11 @@ body{
   .control-inputs{
     justify-self:stretch; display:flex; align-items:center; gap:12px; width:100%;
   }
-  /* Subdivision & Sound should fill their column fully */
   .control-inputs > .selector{ width:100%; }
-  /* Time Signature stays compact */
   .control-inputs.ts .selector.ts-compact{ width:5.2ch; }
 }
 
-/* Mobile (unchanged): stacked rows, label left / inputs right */
+/* Mobile (unchanged) */
 @media (max-width:700px){
   .control-lines{ flex-direction:column; align-items:stretch; gap:20px; }
   .control-line{ justify-content:space-between; width:100%; }
@@ -215,24 +242,21 @@ body{
   padding:10px 12px; cursor:pointer; color:#fff; border-radius:5px; transition:none; touch-action:manipulation;
 }
 @media (hover:hover) and (pointer:fine){
-  .picker__item:hover{ background:var(--gray-3); }  /* #53525d hover on desktop */
+  .picker__item:hover{ background:var(--gray-3); }
 }
 .picker--orange .picker__item.is-active{ background:#fff; color:var(--orange); }
 
-/* Interaction guards and non-hover on touch */
+/* Interaction guards */
 .picker__list, .picker__item{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 .selector, .selector:focus{ -webkit-user-select:none; user-select:none; caret-color:transparent; }
 .picker, .picker *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; caret-color:transparent; }
 .picker .picker__search, .picker .picker__search *{ -webkit-user-select:text !important; user-select:text !important; caret-color:auto !important; }
-@media (hover:none) and (pointer:coarse){
-  .picker__item:hover{ background:transparent; }
-}
 
 /* Animations */
 @keyframes picker-fade-in{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes panel-pop{ from{ opacity:0; transform:translateY(12px) scale(.98); } to{ opacity:1; transform:translateY(0) scale(1); } }
 
-/* Responsive typography tweak */
+/* Responsive type */
 @media (max-width:900px){ .metro-bpm{ font-size:6.2rem; } }
 @media (max-width:700px){
   body{ padding-top:16px; }
@@ -245,9 +269,5 @@ body{
   .btn--purple:hover{ background:var(--purple); }
 }
 
-/* Match BPM input height to 40px (like the buttons in card #1) */
-.tempo-input{
-  height:40px;
-  padding-top:6px;
-  padding-bottom:6px;
-}
+/* Match BPM input height to 40px */
+.tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
