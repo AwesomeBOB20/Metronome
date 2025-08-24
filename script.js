@@ -27,14 +27,39 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundSel = $('#metroSound');
 
   const tsNumTrigger = $('#tsNumTrigger');
-  const tsDenTrigger = $('#tsDenTrigger');
+    const tsDenTrigger = $('#tsDenTrigger');
   const subdivTrigger = $('#subdivTrigger');
   const soundTrigger = $('#soundTrigger');
 
   const lightsWrap = $('#metroLights');   // main lights
   const subLightsWrap = $('#subLights');  // subdivision lights container
 
-  /* ---------------- Picker Modal ---------------- */
+  /* --- iOS/Safari audio unlock on first user interaction --- */
+  (()=>{
+    let unlocked=false;
+    async function unlock(){
+      if (unlocked) return;
+      unlocked = true;
+      ensureCtx();
+      try { await audioCtx.resume(); } catch(_){}
+      try {
+        const b = audioCtx.createBuffer(1,1,22050);
+        const s = audioCtx.createBufferSource();
+        s.buffer=b; s.connect(audioCtx.destination); s.start(0);
+      } catch(_){}
+    }
+    const events = ['pointerdown','touchstart','mousedown','keydown'];
+    events.forEach(ev => document.addEventListener(ev, unlock, { once:true, capture:true }));
+    if (playBtn) playBtn.addEventListener('click', unlock, { once:true, capture:true });
+    if (tapBtn)  tapBtn.addEventListener('click', unlock, { once:true, capture:true });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') unlock();
+    });
+    window.addEventListener('pageshow', unlock);
+  })();
+
+  /* ---------------- Picker Modal -----------
+
   const pickerRoot = $('#pickerRoot');
   const pickerTitle = $('#pickerTitle');
   const pickerClose = $('#pickerClose');
@@ -318,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
   }
 
-  /* ---------------- Audio ---------------- */
+    /* ---------------- Audio ---------------- */
   let audioCtx=null, master=null, comp=null;
   function ensureCtx(){
     if (!audioCtx){
@@ -333,10 +358,19 @@ document.addEventListener('DOMContentLoaded', () => {
       comp.attack.setValueAtTime(0.002, audioCtx.currentTime);
       comp.release.setValueAtTime(0.10, audioCtx.currentTime);
       master.connect(comp).connect(audioCtx.destination);
+
+      // iOS/Safari unlock: immediately resume and play a 1-frame silent buffer
+      try { audioCtx.resume && audioCtx.resume(); } catch(_){ }
+      try {
+        const b = audioCtx.createBuffer(1, 1, 22050);
+        const s = audioCtx.createBufferSource();
+        s.buffer = b; s.connect(audioCtx.destination); s.start(0);
+      } catch(_){ }
     }
   }
 
   const presets = {
+
     beep: {
       accent:[1760,'sine',0.020], beat:[880,'sine',0.018],
       sub:[440,'sine',0.012], subAccent:[660,'triangle',0.014]
