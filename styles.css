@@ -22,7 +22,7 @@
 html, body{ font-family:'Ubuntu',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-weight:400; }
 body{
   margin:0; background:var(--bg); color:#fff;
-  font-size:18px; padding-top:20px;
+  font-size:18px;
 }
 .container{ width:92%; max-width:900px; margin:10px auto; text-align:center; }
 .page-center{ display:block; min-height:unset; padding:8px 0; }
@@ -269,5 +269,5 @@ body{
   .btn--purple:hover{ background:var(--purple); }
 }
 
-/* Match BPM input height t 40px */
+/* Match BPM input height to 40px */
 .tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
