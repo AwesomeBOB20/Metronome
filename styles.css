@@ -65,7 +65,12 @@ body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; } /* s
 
 /* Stacked sections (no grid) */
 .metro-stack{ display:flex; flex-direction:column; gap:26px; }
-.card{ padding:18px; border-radius:12px; border:2px solid var(--black); background:rgba(255,255,255,.02); }
+.card{
+  padding:18px;
+  border-radius:12px;
+  border:2px solid var(--black);
+  background:#06aeb9; /* new blue */
+}
 
 /* Old row (tempo) */
 .metro-row{ display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:center; }
@@ -93,13 +98,14 @@ body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; } /* s
   transition:transform .05s linear, background .05s linear, opacity .05s linear;
   cursor:pointer;
 }
-.metro-light.is-accent{ background:var(--blue); }
-.metro-light.is-beat{ background:var(--orange); }
-/* after: “none” = gray tile */
+/* Variants */
+.metro-light.is-accent{ background:var(--purple); } /* accent = purple */
+.metro-light.is-beat{   background:var(--orange); } /* normal = orange */
 .metro-light.is-muted{
-  background:#1c1c1c;   /* medium gray */
-  opacity:1;            /* keep borders/text crisp */
+  background:var(--blue);  /* none = the old accent color */
+  opacity:1;               /* keep it solid */
 }
+
 .metro-light.is-hit{ transform:scaleY(1.15); }
 
 /* Control lines: desktop inline; mobile stacked with label-left / inputs-right */
