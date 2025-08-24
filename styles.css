@@ -138,7 +138,7 @@ body{
   gap:20px; width:100%; margin:20px 0;
 }
 .metro-light{
-  height:48px; border:2px solid var(--black); border-radius:16px; background:var(--gray-1);
+  height:48px; border:3px solid var(--black); border-radius:16px; background:var(--gray-1);
   box-shadow:none; transform:scaleY(1); transition:transform .05s linear, background .05s linear, opacity .05s linear; cursor:pointer;
 }
 .metro-light.is-accent{ background:var(--purple); }
@@ -244,3 +244,4 @@ body{
   .btn--orange:hover{ background:var(--orange); }
   .btn--purple:hover{ background:var(--purple); }
 }
+
