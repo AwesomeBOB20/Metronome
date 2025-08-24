@@ -318,11 +318,16 @@ document.addEventListener('DOMContentLoaded', () => {
     rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
   }
 
-  /* ---------------- Audio ---------------- */
-  let audioCtx=null, master=null, comp=null;
+  /* ---------------- Audio (with iOS unlock) ---------------- */
+  let audioCtx=null, master=null, comp=null, __audioUnlocked=false;
+
   function ensureCtx(){
     if (!audioCtx){
-      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new Ctx({ latencyHint: 'interactive' });
+      } catch (_) { return; }
+
       master = audioCtx.createGain();
       master.gain.value = 0.9;
 
@@ -334,6 +339,38 @@ document.addEventListener('DOMContentLoaded', () => {
       comp.release.setValueAtTime(0.10, audioCtx.currentTime);
       master.connect(comp).connect(audioCtx.destination);
     }
+  }
+
+  // One-time unlock on first gesture (needed on iOS/Safari)
+  function setupAudioUnlock(){
+    if (__audioUnlocked) return;
+    const events = ['pointerdown','touchend','mousedown','keydown','click'];
+    const unlockOnce = () => {
+      ensureCtx();
+      if (!audioCtx) return;
+
+      try { audioCtx.resume && audioCtx.resume(); } catch {}
+
+      // Fire a tiny, inaudible tick so iOS registers a gesture-started sound
+      try {
+        const b = audioCtx.createBuffer(1, 1, 22050);
+        const src = audioCtx.createBufferSource();
+        src.buffer = b; src.connect(master); src.start(0);
+      } catch {}
+
+      try {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        o.connect(g).connect(master);
+        o.start();
+        o.stop(audioCtx.currentTime + 0.01);
+      } catch {}
+
+      __audioUnlocked = true;
+      events.forEach(ev=>document.removeEventListener(ev, unlockOnce, true));
+    };
+    events.forEach(ev=>document.addEventListener(ev, unlockOnce, true));
   }
 
   const presets = {
@@ -546,7 +583,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function start(){
     if (isRunning) return;
-    ensureCtx(); audioCtx.resume && audioCtx.resume();
+    ensureCtx();
+    try { if (audioCtx && audioCtx.state !== 'running') audioCtx.resume(); } catch {}
     if (getBpm() === 0){ return; }
     isRunning = true;
     playBtn && (playBtn.textContent = 'Stop');
@@ -708,6 +746,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
   window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
+
+  // iOS/Safari helpers: unlock on first gesture, and resume when returning to foreground
+  setupAudioUnlock();
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running'){
+      try { audioCtx.resume(); } catch {}
+    }
+  });
 
   applyDefaultsOnLoad();
 });
