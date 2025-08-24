@@ -69,7 +69,7 @@ body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; } /* s
   padding:18px;
   border-radius:12px;
   border:2px solid var(--black);
-  background:#06aeb9; /* new blue */
+  background: var(--blue);   /* ← accent blue */
 }
 
 /* Old row (tempo) */
