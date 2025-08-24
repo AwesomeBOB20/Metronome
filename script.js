@@ -418,9 +418,14 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ---------------- Scheduler (phase + reset management) ---------------- */
   let isRunning=false;
   let currentBeatInBar=0;
+
+  // NEW: absolute integer counters to avoid float drift
+  let beatCounter=0;
+  let subCounter=0;
+
   let nextBeatTime=0;
   let nextSubTime=0;
-  let subIndex=0;
+  let subIndex=0; // kept for compatibility (not used for timing)
   let scheduleTimer=null;
   let gridT0 = 0; // phase anchor for both rows
 
@@ -432,24 +437,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const den = clampInt(tsDen.value,1,16);
     return bpm>0 ? 60.0/bpm * (4/den) : Infinity;
   }
-  function nextAlignedTime(anchor, interval, now){
-    if (!isFinite(interval) || interval <= 0) return Infinity;
-    const k = Math.ceil((now - anchor - EPS) / interval);
-    return anchor + Math.max(0, k) * interval;
-  }
 
   function alignToGrid(resetToFirst=false){
     if (!audioCtx) return;
-    const now = audioCtx.currentTime;
-    const spb = secondsPerBeat();
+
+    const now   = audioCtx.currentTime;
+    const spb   = secondsPerBeat();
     const ratio = getSubdivRatio();
     const beatsPerBar = clampInt(tsNum.value,1,12);
 
     if (resetToFirst){
-      gridT0 = now + 0.05;
-      nextBeatTime = gridT0;
+      gridT0 = now + 0.05;       // common anchor
+      beatCounter = 0;
+      subCounter  = 0;
       currentBeatInBar = 0;
 
+      nextBeatTime = gridT0;
       if (ratio > EPS){
         nextSubTime = gridT0;
         subIndex = 0;
@@ -462,67 +465,82 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const anchor = gridT0 || (now + 0.05);
-    nextBeatTime = nextAlignedTime(anchor, spb, now);
-    const beatCount = Math.floor((now - anchor + EPS) / spb);
-    currentBeatInBar = ((beatCount % beatsPerBar) + beatsPerBar) % beatsPerBar;
 
-    if (ratio > EPS){
-      const subInt = spb / ratio;
-      nextSubTime = nextAlignedTime(anchor, subInt, now);
-      const n = Math.max(1, Math.round(beatsPerBar * ratio));
-      const subCount = Math.floor((now - anchor + EPS) / subInt);
-      subIndex = ((subCount % n) + n) % n;
+    // snap next BEAT to the first multiple of spb after "now"
+    beatCounter = Math.ceil((now - anchor - EPS) / spb);
+    if (beatCounter < 0) beatCounter = 0;
+    nextBeatTime = anchor + beatCounter * spb;
+    currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
+
+    // snap next SUB to the first multiple of subInterval after "now"
+    const subEnabled = (ratio > EPS) && !isQuartersSubdiv();
+    if (subEnabled){
+      const subInterval = spb / ratio;
+      subCounter = Math.ceil((now - anchor - EPS) / subInterval);
+      if (subCounter < 0) subCounter = 0;
+      nextSubTime = anchor + subCounter * subInterval;
     } else {
       nextSubTime = Infinity;
-      subIndex = 0;
+      subCounter  = 0;
+      subIndex    = 0;
     }
     clearHitClasses();
   }
 
   function schedule(){
-    const spb = secondsPerBeat();
+    const spb   = secondsPerBeat();
     if (!isFinite(spb)) return;
 
     const ratio = getSubdivRatio();
-    const subEnabled = ratio > EPS;
-    const subInterval = subEnabled ? (spb / ratio) : Infinity;
+    // Do not tick subs for plain quarters; stays visually hidden and silent
+    const subEnabled   = ratio > EPS && !isQuartersSubdiv();
+    const subInterval  = subEnabled ? (spb / ratio) : Infinity;
 
-    const beatsPerBar = clampInt(tsNum.value,1,12);
-    const horizon = audioCtx.currentTime + scheduleAheadTime;
+    const beatsPerBar  = clampInt(tsNum.value,1,12);
+    const anchor       = gridT0;
+    const horizon      = audioCtx.currentTime + scheduleAheadTime;
 
     while (true){
-      const tNext = Math.min(nextBeatTime, subEnabled ? nextSubTime : Infinity);
+      // Recompute absolute times from integer counters (phase-locked)
+      nextBeatTime = anchor + beatCounter * spb;
+      if (nextBeatTime < audioCtx.currentTime - EPS){
+        beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
+        nextBeatTime = anchor + beatCounter * spb;
+      }
+
+      nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
+      if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
+        subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
+        nextSubTime = anchor + subCounter * subInterval;
+      }
+
+      const tNext = Math.min(nextBeatTime, nextSubTime);
       if (tNext >= horizon) break;
 
-      if (nextBeatTime <= (subEnabled ? nextSubTime : Infinity) + EPS){
+      // Beat fires
+      if (nextBeatTime <= nextSubTime + EPS){
         const state = beatStates[currentBeatInBar] ?? 1;
         if (state !== 0){
           trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
           pulseLight(currentBeatInBar);
         }
-        nextBeatTime += spb;
+        beatCounter++;
         currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
         continue;
       }
 
+      // Sub fires
       if (subEnabled){
-        const nSubsInBar = Math.max(1, Math.round(beatsPerBar * ratio));
-        const idxInBar = nSubsInBar ? (subIndex % nSubsInBar) : 0;
-
-        // Map sub pulses to visible lights (count = numerator "a")
         const lights = $$('.sub-light', subLightsWrap);
         const visibleCount = lights.length || 1;
-        const visIdx = (visibleCount ? (idxInBar % visibleCount) : 0);
+        const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
 
-        const s = subStates[visIdx] ?? 1; // 0,1,2
-        if (s === 2){
-          trigger(nextSubTime, 'subAccent');
-        } else if (s === 1){
-          trigger(nextSubTime, 'sub');
-        }
+        const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+        if (s === 2) trigger(nextSubTime, 'subAccent');
+        else if (s === 1) trigger(nextSubTime, 'sub');
         pulseSubLightAt(visIdx);
-        nextSubTime += subInterval;
-        subIndex++;
+
+        subCounter++;
       }
     }
   }
