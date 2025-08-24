@@ -277,3 +277,15 @@ body{
 
 /* Match BPM input height to 40px */
 .tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
+
+
+/* Optional: visible keyboard focus */
+.btn:focus-visible,
+.selector:focus-visible,
+.picker__close:focus-visible {
+  outline:3px solid #fff;
+  outline-offset:2px;
+}
+
+/* Optional: give the app a bit of breathing room without shifting the whole page */
+.container{ margin:16px auto; } /* was 10px */
