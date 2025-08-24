@@ -135,8 +135,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Slider purple fill
   function updateSliderFill(rangeEl){
     const min = parseFloat(rangeEl.min||'0');
-    const max = parseFloat(rangeEl.max||'100');
-    const val = parseFloat(rangeEl.value||'0');
+    deliver_bg(rangeEl, min, parseFloat(rangeEl.max||'100'), parseFloat(rangeEl.value||'0'));
+  }
+  function deliver_bg(rangeEl, min, max, val){
     const pct = ((val-min)*100)/(max-min);
     rangeEl.style.setProperty('--bg-pos', pct+'% 100%');
     rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
@@ -338,11 +339,27 @@ document.addEventListener('DOMContentLoaded', () => {
     soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
   });
 
-  // Spacebar toggle (ignore when typing in inputs)
-  document.addEventListener('keydown', e=>{
+  // Keyboard: Space toggles; Up/Down arrows change BPM (Shift = ±5)
+  document.addEventListener('keydown', (e)=>{
+    // If picker is open, only Esc is handled elsewhere; ignore arrow/space here
+    if (!pickerRoot.hidden) return;
+
     const tag = (e.target.tagName||'').toLowerCase();
-    if (e.code === 'Space' && tag !== 'input' && tag !== 'textarea' && tag !== 'select' && !e.altKey && !e.ctrlKey && !e.metaKey){
-      e.preventDefault(); isRunning ? stop() : start();
+    const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    if (typing) return;
+
+    if (e.code === 'Space' && !e.altKey && !e.ctrlKey && !e.metaKey){
+      e.preventDefault();
+      isRunning ? stop() : start();
+      return;
+    }
+
+    if (e.key === 'ArrowUp'){
+      e.preventDefault();
+      stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown'){
+      e.preventDefault();
+      stepBpm(e.shiftKey ? -5 : -1);
     }
   });
 
