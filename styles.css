@@ -1,0 +1,141 @@
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400&display=swap');
+
+/* === Theme === */
+:root{
+  --black:#000; --white:#fff;
+  --bg:#1c1c1c;
+  --orange:#d35400; --orange-d:#c25227; --orange-dim:#a84300; /* darker hover */
+  --purple:#96318d; --purple-d:#81227a; --purple-dim:#752070;
+  --gray-1:#ddd; --blue:#058890; --blue-d:#04767e; --blue-dim:#03656b;
+}
+
+/* Base */
+*{ box-sizing:border-box; }
+html, body{ font-family:'Ubuntu',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-weight:400; }
+body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; } /* slightly bigger text */
+.container{ width:92%; max-width:900px; margin:24px auto; text-align:center; }
+.page-center{ min-height:100vh; display:flex; align-items:center; justify-content:center; }
+
+/* Buttons — scaled up, darker hover */
+.btn{ height:48px; display:inline-flex; align-items:center; justify-content:center; border:2px solid var(--black); color:#fff; font-size:1.15rem; padding:8px 14px; border-radius:6px; cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent; }
+.btn--orange{ background:var(--orange); }
+.btn--orange:hover{ background:var(--orange-dim); }
+.btn--purple{ background:var(--purple); }
+.btn--purple:hover{ background:var(--purple-dim); }
+.btn:disabled{ background:var(--orange-dim); cursor:not-allowed; }
+.btn-square{ width:48px; height:48px; padding:0; }
+
+/* Selects & inputs (dropdown menus match selector where supported) */
+.selector{ width:11rem; max-width:100%; height:40px; padding:6px 10px; font-size:1.05rem; border:2px solid var(--black); border-radius:6px; color:#fff; background:var(--orange); text-align:left; }
+.selector--orange{ background:var(--orange); }
+.selector--orange:hover, .selector--orange:focus{ background:var(--orange-dim); }
+.selector option, .selector optgroup{ background:var(--orange); color:#fff; } /* best-effort; UA-dependent */
+
+.ts-compact{ width:5.2ch; min-width:0; text-align:center; padding-left:8px; padding-right:8px; }
+
+.tempo-input{ width:7rem; height:44px; padding:8px; font-size:1.1rem; border:2px solid var(--black); border-radius:6px; background:#fff; color:#000; text-align:center; }
+
+.metro-label{ color:var(--white); font-size:1.1rem; } /* a bit larger */
+.metro-slash{ color:var(--white); font-weight:700; font-size:1.3rem; }
+
+/* Slider — thicker track & thumb, purple fill left side */
+.slider-fill{
+  --thumb:24px;
+  width:100%; height:16px; border-radius:6px;
+  box-shadow:inset 0 0 0 2px var(--black);
+  background:linear-gradient(to right,var(--purple) 0 0) no-repeat var(--bg-pos,0/0%), var(--gray-1);
+  -webkit-appearance:none; appearance:none;
+}
+.slider-fill::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:var(--thumb); height:var(--thumb); background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
+}
+.slider-fill::-moz-range-thumb{
+  width:var(--thumb); height:var(--thumb); background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
+}
+
+/* Panel & display */
+.metro-panel{ width:100%; margin:0 auto; background:transparent; border:none; }
+.metro-display{ display:flex; flex-direction:column; align-items:center; gap:12px; margin-bottom:12px; }
+
+/* Tight BPM cluster (no full-width) */
+.bpm-line{ display:flex; align-items:center; justify-content:center; gap:16px; width:auto; }
+.bpm-stack{ display:flex; flex-direction:column; gap:10px; }
+.metro-bpm{ font-size:8rem; line-height:1; color:#fff; text-shadow:0 2px 0 var(--black); } /* 8rem desktop */
+
+/* Stacked sections (no grid) */
+.metro-stack{ display:flex; flex-direction:column; gap:26px; }
+.card{ padding:18px; border-radius:12px; border:2px solid var(--black); background:rgba(255,255,255,.02); }
+
+/* Old row (tempo) */
+.metro-row{ display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:center; }
+
+/* Tempo row layout */
+.tempo-row{ align-items:center; }
+.tempo-row #metroBpmRange{ flex:1 1 480px; min-width:220px; }
+
+/* Lights: top, very thick, full width, with margins */
+.metro-lights{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(28px,1fr);
+  gap:16px;
+  width:100%;
+  margin:20px 0;
+}
+.metro-light{
+  height:48px;
+  border:2px solid var(--black);
+  border-radius:16px;
+  background:var(--gray-1);
+  box-shadow:inset 0 0 0 2px var(--black);
+  transform:scaleY(1);
+  transition:transform .05s linear, background .05s linear, opacity .05s linear;
+  cursor:pointer;
+}
+.metro-light.is-accent{ background:var(--blue); }
+.metro-light.is-beat{ background:var(--orange); }
+/* after: “none” = gray tile */
+.metro-light.is-muted{
+  background:#1c1c1c;   /* medium gray */
+  opacity:1;            /* keep borders/text crisp */
+}
+.metro-light.is-hit{ transform:scaleY(1.15); }
+
+/* Control lines: desktop inline; mobile stacked with label-left / inputs-right */
+.control-lines{
+  display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:center;
+}
+.control-line{
+  display:flex; align-items:center; gap:12px;
+}
+.control-inputs{
+  display:flex; align-items:center; gap:10px;
+}
+
+@media (max-width: 900px){
+  .metro-bpm{ font-size:6.2rem; }
+}
+
+@media (max-width: 700px){
+  /* BPM line spacing on mobile */
+  .bpm-line{ margin:20px 0; }
+
+  /* Stack control lines full-width; label left, inputs right */
+  .control-lines{ flex-direction:column; align-items:stretch; gap:14px; }
+  .control-line{
+    justify-content:space-between;
+    width:100%;
+  }
+  .control-line .metro-label{
+    text-align:left;
+  }
+  .control-inputs{
+    justify-content:flex-end;
+    gap:10px;
+    flex:0 0 auto;
+  }
+
+  .btn-square{ width:44px; height:44px; }
+  .metro-bpm{ font-size:5.2rem; }
+}
