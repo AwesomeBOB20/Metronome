@@ -1,5 +1,5 @@
 /* === METRONOME — centered, equal-width two-row subs; tri-state sub lights; distinct sub accents; phase-locked clocks;
-       reset-to-first on stop/changes; hide subs for quarters; auto-set TS numerator (3 for x/3, else 4) === */
+       reset-to-first on stop/changes; hide subs lights for quarters (1/1) but KEEP quarter subs audible; auto-set TS numerator (3 for x/3, else 4) === */
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -165,7 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderSubLights(){
     if (!subLightsWrap) return;
 
-    // Hide subs entirely for quarters (1/1)
+    // Hide subs lights entirely for quarters (1/1) — audio still plays via scheduler
     if (isQuartersSubdiv()){
       subLightsWrap.hidden = true;
       subLightsWrap.innerHTML = '';
@@ -419,13 +419,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let isRunning=false;
   let currentBeatInBar=0;
 
-  // NEW: absolute integer counters to avoid float drift
+  // Absolute integer counters to avoid float drift
   let beatCounter=0;
   let subCounter=0;
 
   let nextBeatTime=0;
   let nextSubTime=0;
-  let subIndex=0; // kept for compatibility (not used for timing)
+  let subIndex=0; // kept for compatibility with UI calc
   let scheduleTimer=null;
   let gridT0 = 0; // phase anchor for both rows
 
@@ -454,7 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       nextBeatTime = gridT0;
       if (ratio > EPS){
-        nextSubTime = gridT0;
+        nextSubTime = gridT0;    // even for quarters: keep subs audible
         subIndex = 0;
       } else {
         nextSubTime = Infinity;
@@ -472,9 +472,8 @@ document.addEventListener('DOMContentLoaded', () => {
     nextBeatTime = anchor + beatCounter * spb;
     currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
 
-    // snap next SUB to the first multiple of subInterval after "now"
-    const subEnabled = (ratio > EPS) && !isQuartersSubdiv();
-    if (subEnabled){
+    // snap next SUB to the first multiple of subInterval after "now" (quarters allowed)
+    if (ratio > EPS){
       const subInterval = spb / ratio;
       subCounter = Math.ceil((now - anchor - EPS) / subInterval);
       if (subCounter < 0) subCounter = 0;
@@ -492,8 +491,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isFinite(spb)) return;
 
     const ratio = getSubdivRatio();
-    // Do not tick subs for plain quarters; stays visually hidden and silent
-    const subEnabled   = ratio > EPS && !isQuartersSubdiv();
+    // Subs audible whenever a ratio is set (> 0), including quarters
+    const subEnabled   = ratio > EPS;
     const subInterval  = subEnabled ? (spb / ratio) : Infinity;
 
     const beatsPerBar  = clampInt(tsNum.value,1,12);
@@ -529,10 +528,10 @@ document.addEventListener('DOMContentLoaded', () => {
         continue;
       }
 
-      // Sub fires
+      // Sub fires (audio even if lights hidden)
       if (subEnabled){
         const lights = $$('.sub-light', subLightsWrap);
-        const visibleCount = lights.length || 1;
+        const visibleCount = lights.length || 1; // if lights hidden, still tick audio
         const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
 
         const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
