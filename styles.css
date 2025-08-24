@@ -32,7 +32,7 @@ body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; }
   text-align:center;
 }
 
-/* Kill full-viewport vertical centering and tighten spacing */
+/* Kill full-viewport vertical centering and tigten spacing */
 .page-center{
   display:block;
   min-height:unset;
@@ -193,3 +193,4 @@ body{ margin:0; background:var(--bg); color:var(--white); font-size:18px; }
   .btn-square{ width:44px; height:44px; }
   .metro-bpm{ font-size:5.2rem; }
 }
+
