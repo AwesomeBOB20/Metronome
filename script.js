@@ -1,4 +1,4 @@
-/* === METRONOME (lights top, tight BPM cluster, inline tempo row, sound select) === */
+/* === METRONOME with modal pickers & mobile transport layout === */
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -22,15 +22,82 @@ document.addEventListener('DOMContentLoaded', () => {
   const subdivSel = $('#metroSubdivision');
   const soundSel = $('#metroSound');
 
+  const tsNumTrigger = $('#tsNumTrigger');
+  const tsDenTrigger = $('#tsDenTrigger');
+  const subdivTrigger = $('#subdivTrigger');
+  const soundTrigger = $('#soundTrigger');
+
   const lightsWrap = $('#metroLights');
 
-  // Config
-  const MUTE_SUBDIV_ON_MUTED_BEAT = true;
+  /* ---------------- Picker Modal (overlay) ---------------- */
+  const pickerRoot = $('#pickerRoot');
+  const pickerTitle = $('#pickerTitle');
+  const pickerClose = $('#pickerClose');
+  const pickerSearch = $('#pickerSearch');
+  const pickerList = $('#pickerList');
+  let activeSelect = null, activeTrigger = null;
 
-  // Helpers
+  function openPicker(trigger, selectEl, titleText){
+    activeSelect = selectEl;
+    activeTrigger = trigger;
+    pickerTitle.textContent = titleText || 'Select';
+    pickerSearch.value = '';
+    renderPickerList('');
+    pickerRoot.hidden = false;
+    document.body.classList.add('modal-open');
+    pickerSearch.focus({preventScroll:true});
+  }
+
+  function closePicker(){
+    pickerRoot.hidden = true;
+    document.body.classList.remove('modal-open');
+    activeSelect = null; activeTrigger = null;
+  }
+
+  function renderPickerList(filter){
+    pickerList.innerHTML = '';
+    const opts = [...activeSelect.options];
+    const q = filter.trim().toLowerCase();
+    opts.forEach((opt, idx)=>{
+      const txt = opt.text || opt.value;
+      if (q && !txt.toLowerCase().includes(q)) return;
+      const li = document.createElement('li');
+      li.className = 'picker__item' + (idx===activeSelect.selectedIndex ? ' is-active':'');
+      li.textContent = txt;
+      li.setAttribute('role','option');
+      li.addEventListener('click', ()=>{
+        activeSelect.value = opt.value || txt;
+        activeSelect.dispatchEvent(new Event('change', {bubbles:true}));
+        if (activeTrigger) activeTrigger.value = txt;
+        closePicker();
+      });
+      pickerList.appendChild(li);
+    });
+  }
+
+  pickerClose.addEventListener('click', closePicker);
+  pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
+  document.addEventListener('keydown', (e)=>{
+    if (!pickerRoot.hidden && e.key === 'Escape') closePicker();
+  });
+  pickerRoot.addEventListener('click', (e)=>{ if (e.target === pickerRoot) closePicker(); });
+
+  function attachPicker(trigger){
+    const selectId = trigger.getAttribute('data-picker');
+    const title = trigger.getAttribute('data-title') || 'Select';
+    const sel = $('#'+selectId);
+    if (!sel) return;
+    // Set initial trigger text
+    trigger.value = sel.options[sel.selectedIndex]?.text || '';
+    trigger.addEventListener('click', ()=> openPicker(trigger, sel, title));
+  }
+  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+
+  /* ---------------- Metronome core ---------------- */
+  const MUTE_SUBDIV_ON_MUTED_BEAT = true;
   const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
   const getBpm = ()=>clampInt(bpmRange.value,0,400);
-  const getSubdiv = ()=>clampInt(subdivSel.value,1,8);
+  const getSubdiv = ()=>clampInt(subdivSel.value, 1, 10);
 
   // Beat states per bar: 0=muted, 1=normal, 2=accent (click cycles: 1→2→0→1)
   let beatStates = [];
@@ -95,7 +162,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Sounds
   const presets = {
     beep:   { accent:[1760,'sine',0.02],      beat:[880,'sine',0.018],     sub:[440,'sine',0.012] },
     click:  { accent:[3000,'triangle',0.008], beat:[2500,'square',0.006],  sub:[2000,'square',0.004] },
@@ -201,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function start(){
     if (isRunning) return;
     ensureCtx(); audioCtx.resume && audioCtx.resume();
-    if (getBpm() === 0){ return; } // silent if BPM==0
+    if (getBpm() === 0){ return; }
 
     isRunning = true;
     playBtn.textContent = 'Stop';
@@ -219,19 +285,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function softReset(){ if (isRunning){ currentBeatInBar=0; tickCount=0; nextNoteTime=audioCtx.currentTime+0.05; } }
 
-  // Tap Tempo
-  const taps = []; let lastTap = 0;
+  // Tap Tempo — lock exactly on 4th tap (median of last 3 intervals)
+  const TAP_RESET_MS = 1500;
+  let tapTimes = [];
   function onTap(){
     const now = performance.now();
-    if (!lastTap || (now - lastTap) > 2000){ taps.length = 0; }
-    if (lastTap) taps.push(now - lastTap);
-    lastTap = now;
-    if (taps.length >= 3){
-      const arr = [...taps].sort((a,b)=>a-b);
-      const trimmed = arr.slice(1, arr.length-1);
-      const avg = (trimmed.length ? trimmed : arr).reduce((s,x)=>s+x,0) / (trimmed.length ? trimmed.length : arr.length);
-      const bpm = clampInt(Math.round(60000/avg), 0, 400);
-      setBpmUI(bpm); softReset();
+    if (tapTimes.length && (now - tapTimes[tapTimes.length - 1]) > TAP_RESET_MS) tapTimes = [];
+    tapTimes.push(now);
+    if (tapTimes.length > 4) tapTimes.shift();
+    if (tapTimes.length === 4){
+      const [t0,t1,t2,t3] = tapTimes;
+      const ivals = [t1-t0, t2-t1, t3-t2].sort((a,b)=>a-b);
+      const ms = ivals[1];
+      const bpm = clampInt(Math.round(60000 / ms), 0, 400);
+      setBpmUI(bpm);
+      softReset();
     }
   }
 
@@ -259,22 +327,28 @@ document.addEventListener('DOMContentLoaded', () => {
   bpmInput.addEventListener('input', e=> setBpmUI(e.target.value||0));
 
   [tsNum, tsDen, subdivSel].forEach(el=> el.addEventListener('change', ()=>{
+    // sync trigger text to selected option
+    if (el === tsNum) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    if (el === tsDen) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    if (el === subdivSel) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+
     beatStates = defaultBeatStates(); renderLights(); softReset();
   }));
-  soundSel.addEventListener('change', ()=>{ /* switch timbre; compressor keeps loudness even */ });
+  soundSel.addEventListener('change', ()=>{
+    soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+  });
 
   // Spacebar toggle (ignore when typing in inputs)
   document.addEventListener('keydown', e=>{
     const tag = (e.target.tagName||'').toLowerCase();
-    if (e.code === 'Space' && tag !== 'input' && tag !== 'textarea' && tag !== 'select'){
+    if (e.code === 'Space' && tag !== 'input' && tag !== 'textarea' && tag !== 'select' && !e.altKey && !e.ctrlKey && !e.metaKey){
       e.preventDefault(); isRunning ? stop() : start();
     }
   });
 
-  // ----- Init (force defaults on every load)
+  // ----- Init (defaults each load)
   const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1', sound:'beep' };
   function applyDefaultsOnLoad(){
-    isRunning = false;
     setBpmUI(defaults.bpm);
     tsNum.value = defaults.tsNum;
     tsDen.value = defaults.tsDen;
@@ -283,6 +357,12 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSliderFill(bpmRange);
     beatStates = defaultBeatStates();
     renderLights();
+
+    // Sync trigger texts
+    tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
   }
   [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
   window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
