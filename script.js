@@ -1,4 +1,4 @@
-/* === METRONOME with modal pickers & mobile transport layout === */
+/* === METRONOME with modal pickers & mobile transport layout=== */
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -386,3 +386,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
   applyDefaultsOnLoad();
 });
+
