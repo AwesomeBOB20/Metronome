@@ -269,5 +269,5 @@ body{
   .btn--purple:hover{ background:var(--purple); }
 }
 
-/* Match BPM input height to 40px */
+/* Match BPM input height t 40px */
 .tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
