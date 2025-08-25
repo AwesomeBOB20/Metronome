@@ -294,3 +294,18 @@ body{
 
 /* Optional: give the app a bit of breathing room without shifting the whole page */
 .container{ margin:16px auto; } /* was 10px */
+
+@media (max-width:700px){
+  .tempo-row.transport-eq{
+    display:grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    grid-auto-rows: min-content;
+    gap:20px; align-items:center; width:100%;
+  }
+  .tempo-row.transport-eq #metroBpmRange{
+    grid-column: 1 / 4;   /* span all three columns */
+    grid-row: 2 / 3;      /* force onto the second row */
+    min-width: 0;
+  }
+}
+
