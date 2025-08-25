@@ -1,5 +1,4 @@
-/* === METRONOME — centered, equal-width two-row subs; tri-state sub lights; distinct sub accents; phase-locked clocks;
-       reset-to-first on stop/changes; hide subs lights for quarters (1/1) and DISABLE quarter sub audio; auto-set TS numerator (3 for x/3, else 4) === */
+/* === METRONOME — iOS-safe slider + quarter subs fully removed; centered subs rows; phase-locked clocks === */
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -33,6 +32,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const lightsWrap = $('#metroLights');   // main lights
   const subLightsWrap = $('#subLights');  // subdivision lights container
+
+  /* ---------------- iOS slider hardening ---------------- */
+  const IS_IOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+
+  if (IS_IOS) document.documentElement.classList.add('is-ios');
+
+  // Defocus helper: ensures the range input doesn't keep focus/capture
+  function defocusSlider() {
+    if (!bpmRange) return;
+    try { bpmRange.blur(); } catch {}
+  }
+
+  // If the slider ever gets pointer capture, make sure we can release it
+  function releaseCapture() {
+    if (!bpmRange) return;
+    try {
+      // There is no public way to know the last pointer id; releasing without id is fine
+      bpmRange.releasePointerCapture && [0,1,2,3,4,5].forEach(id=>{
+        try { bpmRange.releasePointerCapture(id); } catch {}
+      });
+    } catch {}
+  }
+
+  if (bpmRange) {
+    // iOS: if you start a pointer anywhere other than the slider, force-blur and release capture
+    const outsideDown = (e) => {
+      if (e.target !== bpmRange) {
+        releaseCapture();
+        defocusSlider();
+      }
+    };
+    document.addEventListener('pointerdown', outsideDown, true);
+    document.addEventListener('touchstart',  outsideDown, true);
+    document.addEventListener('mousedown',   outsideDown, true);
+
+    // If slider itself starts a drag, remember & capture; if it ends, clean up
+    let lastPid = null;
+    bpmRange.addEventListener('pointerdown', (e) => {
+      lastPid = e.pointerId;
+      try { bpmRange.setPointerCapture && bpmRange.setPointerCapture(e.pointerId); } catch {}
+    });
+    const endDrag = () => {
+      try { if (lastPid != null) bpmRange.releasePointerCapture && bpmRange.releasePointerCapture(lastPid); } catch {}
+      lastPid = null;
+      defocusSlider();
+    };
+    bpmRange.addEventListener('pointerup', endDrag, { passive: true });
+    bpmRange.addEventListener('pointercancel', endDrag, { passive: true });
+    bpmRange.addEventListener('touchend', endDrag, { passive: true });
+    bpmRange.addEventListener('touchcancel', endDrag, { passive: true });
+
+    // Extra guard: any click outside should never bubble into “changing the slider”
+    document.addEventListener('click', (e) => {
+      if (e.target !== bpmRange) {
+        releaseCapture();
+        defocusSlider();
+      }
+    }, true);
+  }
 
   /* ---------------- Picker Modal ---------------- */
   const pickerRoot = $('#pickerRoot');
@@ -174,7 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const n = subsLightsCount();
-
     if (n <= 0){
       subLightsWrap.hidden = true;
       subLightsWrap.innerHTML = '';
@@ -388,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     clave: {
       accent:['clave',null,0.028], beat:['clave',null,0.020],
-      sub:[440,'triangle',0.014], subAccent:[980,'sine',0.016] // soft alt
+      sub:['clave',null,0.014], subAccent:['clave-soft',null,0.016]
     },
     analog: {
       accent:[1200,'sawtooth',0.020], beat:[900,'sawtooth',0.016],
@@ -398,7 +457,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const presetLevel = { beep:1.00, click:1.00, wood:1.00, clave:1.00, analog:1.00 };
   const kindScale = k => k==='accent'?1.0 : k==='beat'?0.8 : 0.6;
 
+  // Hard guard: never play sub sounds for quarters (extra safety for iOS)
   function trigger(time, kind, gainMul=1){
+    if ((kind === 'sub' || kind === 'subAccent') && isQuartersSubdiv()) return;
+
     const chosen = (soundSel?.value || 'beep');
     const p = (presets[chosen] || presets.beep);
     const spec = p[kind] || (kind==='subAccent' ? p.sub : null) || p.beat;
@@ -510,8 +572,8 @@ document.addEventListener('DOMContentLoaded', () => {
     nextBeatTime = anchor + beatCounter * spb;
     currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
 
-    // snap next SUB to the first multiple of subInterval after "now"
-    if (ratio > EPS){
+    // snap next SUB to the first multiple of subInterval after "now" (quarters disabled)
+    if (ratio > EPS && !isQuartersSubdiv()){
       const subInterval = spb / ratio;
       subCounter = Math.ceil((now - anchor - EPS) / subInterval);
       if (subCounter < 0) subCounter = 0;
@@ -561,7 +623,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const state = beatStates[currentBeatInBar] ?? 1;
         if (state !== 0){
           trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
-          // For quarters, we do NOT schedule sub audio at all.
           pulseLight(currentBeatInBar);
         }
         beatCounter++;
@@ -572,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Sub fires (non-quarter subdivisions only)
       if (subEnabled){
         const lights = $$('.sub-light', subLightsWrap);
-        const visibleCount = lights.length || 1; // if lights hidden, still tick audio path (but here subEnabled=>not quarters so lights should exist)
+        const visibleCount = lights.length || 1; // if lights hidden, still tick audio (but guarded)
         const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
 
         const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
@@ -724,98 +785,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  /* ===== iOS-only slider guards (thumb-only shield + blur on outside tap) ===== */
-  (function iosSliderGuards(){
-    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (!isiOS || !bpmRange) return;
-
-    // 1) Blur the BPM slider when tapping anywhere else (prevents “global slider” capture)
-    function defocusBpm(){
-      if (bpmRange && document.activeElement === bpmRange) bpmRange.blur();
-    }
-    document.addEventListener('pointerdown', (e)=>{
-      if (e.target !== bpmRange) defocusBpm();
-    }, { capture:true, passive:true });
-
-    // 2) Transparent shield: only allow drags that start near the thumb
-    const wrap = document.createElement('div');
-    wrap.style.position='relative';
-    wrap.style.display='block';
-    wrap.style.width='100%';
-    bpmRange.parentNode.insertBefore(wrap, bpmRange);
-    wrap.appendChild(bpmRange);
-
-    const shield = document.createElement('div');
-    Object.assign(shield.style, {
-      position:'absolute', inset:'0', background:'transparent', zIndex:'5', touchAction:'none'
-    });
-    wrap.appendChild(shield);
-
-    const THUMB_RADIUS = 24; // px
-    let dragging = false;
-
-    function thumbCenterX(){
-      const rect = bpmRange.getBoundingClientRect();
-      const min  = Number(bpmRange.min) || 0;
-      const max  = Number(bpmRange.max) || 100;
-      const v    = Number(bpmRange.value) || 0;
-      const pct  = (v - min) / (max - min || 1);
-      return rect.left + pct * rect.width;
-    }
-    function setFromClientX(clientX){
-      const rect = bpmRange.getBoundingClientRect();
-      const x    = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-      const min  = Number(bpmRange.min) || 0;
-      const max  = Number(bpmRange.max) || 100;
-      const val  = Math.round(min + (x / (rect.width || 1)) * (max - min));
-      bpmRange.value = String(val);
-      // Reuse existing input logic (updates number, slider fill, scheduler alignment)
-      bpmRange.dispatchEvent(new Event('input', { bubbles:true }));
-    }
-    function start(e){
-      const t = e.touches ? e.touches[0] : e;
-      const onThumb = Math.abs(t.clientX - thumbCenterX()) <= THUMB_RADIUS;
-
-      if (!onThumb){
-        // Ignore track taps; prevent iOS from promoting slider to “page-wide” controller
-        e.preventDefault();
-        e.stopPropagation();
-        defocusBpm();
-        return;
-      }
-
-      dragging = true;
-      e.preventDefault();
-      e.stopPropagation();
-      try { bpmRange.focus({ preventScroll:true }); } catch {}
-      move(e);
-
-      window.addEventListener('pointermove', move, { passive:false });
-      window.addEventListener('pointerup', end, { passive:true, once:true });
-      window.addEventListener('pointercancel', end, { passive:true, once:true });
-      window.addEventListener('touchmove', move, { passive:false });
-      window.addEventListener('touchend', end, { passive:true, once:true });
-      window.addEventListener('touchcancel', end, { passive:true, once:true });
-    }
-    function move(e){
-      if (!dragging) return;
-      const t = e.touches ? e.touches[0] : e;
-      setFromClientX(t.clientX);
-      e.preventDefault();
-    }
-    function end(){
-      if (!dragging) return;
-      dragging = false;
-      defocusBpm();
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('touchmove',   move);
-    }
-
-    shield.addEventListener('pointerdown', start, { passive:false });
-    shield.addEventListener('touchstart',  start, { passive:false });
-  })();
-
   /* ---------------- Init ---------------- */
   const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep' };
   function applyDefaultsOnLoad(){
@@ -833,9 +802,11 @@ document.addEventListener('DOMContentLoaded', () => {
     subStates = n > 0 ? defaultSubStates(n) : [];
     renderSubLights();
 
-    if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
-    if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
-    if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    // inside applyDefaultsOnLoad()
+if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || ''; // ← use tsDen here
+if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+
     if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
 
     alignToGrid(true); // start state: first light ready
