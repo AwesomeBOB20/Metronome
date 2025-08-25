@@ -32,11 +32,48 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundTrigger = $('#soundTrigger');
 
   const lightsWrap = $('#metroLights');   // main lights
-  const subLightsWrap = $('#subLights');  // subdivision lights container
+const subLightsWrap = $('#subLights');  // subdivision lights container
 
-  /* ---------------- Picker Modal ---------------- */
-  const pickerRoot = $('#pickerRoot');
-  const pickerTitle = $('#pickerTitle');
+/* iOS detect + thumb-only slider behavior (prevents slider from “owning” other buttons) */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+if (IS_IOS) document.documentElement.classList.add('is-ios');
+
+if (IS_IOS && bpmRange){
+  let dragging = false, lastPid = null;
+
+  function endDrag(){
+    dragging = false;
+    try {
+      if (lastPid != null && bpmRange.releasePointerCapture) {
+        bpmRange.releasePointerCapture(lastPid);
+      }
+    } catch {}
+    bpmRange.blur && bpmRange.blur();
+    lastPid = null;
+  }
+
+  bpmRange.addEventListener('pointerdown', e=>{
+    dragging = true;
+    lastPid = e.pointerId;
+    bpmRange.setPointerCapture && bpmRange.setPointerCapture(e.pointerId);
+  });
+
+  // If you start a new pointer down anywhere else, release the slider immediately
+  document.addEventListener('pointerdown', e=>{
+    if (e.target !== bpmRange) endDrag();
+  }, true);
+
+  // End drag on any “up/cancel”
+  ['pointerup','pointercancel','mouseup','touchend','touchcancel'].forEach(ev=>{
+    document.addEventListener(ev, endDrag, true);
+  });
+}
+
+/* ---------------- Picker Modal ---------------- */
+const pickerRoot = $('#pickerRoot');
+const pickerTitle = $('#pickerTitle');
+
   const pickerClose = $('#pickerClose');
   const pickerSearch = $('#pickerSearch');
   const pickerList = $('#pickerList');
@@ -165,13 +202,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderSubLights(){
     if (!subLightsWrap) return;
 
-    // Hide subs lights entirely for quarters (1/1) — audio still plays via scheduler
-    if (isQuartersSubdiv()){
-      subLightsWrap.hidden = true;
-      subLightsWrap.innerHTML = '';
-      subStates = [];
-      return;
-    }
+    // Hide subs lights entirely for quarters (1/1) — audio is attached to main beats
+if (isQuartersSubdiv()){
+  subLightsWrap.hidden = true;
+  subLightsWrap.innerHTML = '';
+  subStates = [];
+  return;
+}
+
 
     const n = subsLightsCount();
 
@@ -484,22 +522,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const beatsPerBar = clampInt(tsNum.value,1,12);
 
     if (resetToFirst){
-      gridT0 = now + 0.05;       // common anchor
-      beatCounter = 0;
-      subCounter  = 0;
-      currentBeatInBar = 0;
+  gridT0 = now + 0.05;       // common anchor
+  beatCounter = 0;
+  subCounter  = 0;
+  currentBeatInBar = 0;
 
-      nextBeatTime = gridT0;
-      if (ratio > EPS){
-        nextSubTime = gridT0;    // even for quarters: keep subs audible
-        subIndex = 0;
-      } else {
-        nextSubTime = Infinity;
-        subIndex = 0;
-      }
-      clearHitClasses();
-      return;
-    }
+  nextBeatTime = gridT0;
+  // For quarters (1/1) we attach subs to the main beat; don't schedule subs independently
+  if (ratio > EPS && !isQuartersSubdiv()){
+    nextSubTime = gridT0;
+    subIndex = 0;
+  } else {
+    nextSubTime = Infinity;
+    subIndex = 0;
+  }
+  clearHitClasses();
+  return;
+}
+
 
     const anchor = gridT0 || (now + 0.05);
 
@@ -524,62 +564,73 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function schedule(){
-    const spb   = secondsPerBeat();
-    if (!isFinite(spb)) return;
+  const spb   = secondsPerBeat();
+  if (!isFinite(spb)) return;
 
-    const ratio = getSubdivRatio();
-    // Subs audible whenever a ratio is set (> 0), including quarters
-    const subEnabled   = ratio > EPS;
-    const subInterval  = subEnabled ? (spb / ratio) : Infinity;
+  const ratio = getSubdivRatio();
+  const isQuarter = isQuartersSubdiv();
 
-    const beatsPerBar  = clampInt(tsNum.value,1,12);
-    const anchor       = gridT0;
-    const horizon      = audioCtx.currentTime + scheduleAheadTime;
+  // Independent sub scheduler only for non-quarter subdivisions
+  const subEnabled   = (ratio > EPS) && !isQuarter;
+  const subInterval  = subEnabled ? (spb / ratio) : Infinity;
 
-    while (true){
-      // Recompute absolute times from integer counters (phase-locked)
+  const beatsPerBar  = clampInt(tsNum.value,1,12);
+  const anchor       = gridT0;
+  const horizon      = audioCtx.currentTime + scheduleAheadTime;
+
+  while (true){
+    // Recompute absolute times from integer counters (phase-locked)
+    nextBeatTime = anchor + beatCounter * spb;
+    if (nextBeatTime < audioCtx.currentTime - EPS){
+      beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
       nextBeatTime = anchor + beatCounter * spb;
-      if (nextBeatTime < audioCtx.currentTime - EPS){
-        beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
-        nextBeatTime = anchor + beatCounter * spb;
-      }
+    }
 
-      nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
-      if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
-        subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
-        nextSubTime = anchor + subCounter * subInterval;
-      }
+    nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
+    if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
+      subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
+      nextSubTime = anchor + subCounter * subInterval;
+    }
 
-      const tNext = Math.min(nextBeatTime, nextSubTime);
-      if (tNext >= horizon) break;
+    const tNext = Math.min(nextBeatTime, nextSubTime);
+    if (tNext >= horizon) break;
 
-      // Beat fires
-      if (nextBeatTime <= nextSubTime + EPS){
-        const state = beatStates[currentBeatInBar] ?? 1;
-        if (state !== 0){
-          trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
-          pulseLight(currentBeatInBar);
+    // Beat fires
+    if (nextBeatTime <= nextSubTime + EPS){
+      const state = beatStates[currentBeatInBar] ?? 1;
+
+      if (state !== 0){
+        // Main beat (accent or normal)
+        trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+        // For QUARTER subdivision: also play the normal subdivision sound with the beat
+        if (isQuarter){
+          trigger(nextBeatTime, 'sub'); // always normal sub, even on accent
         }
-        beatCounter++;
-        currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
-        continue;
+        pulseLight(currentBeatInBar);
       }
+      // If state === 0 (muted), quarters' sub drops out with it (nothing to trigger)
 
-      // Sub fires (audio even if lights hidden)
-      if (subEnabled){
-        const lights = $$('.sub-light', subLightsWrap);
-        const visibleCount = lights.length || 1; // if lights hidden, still tick audio
-        const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
+      beatCounter++;
+      currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+      continue;
+    }
 
-        const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
-        if (s === 2) trigger(nextSubTime, 'subAccent');
-        else if (s === 1) trigger(nextSubTime, 'sub');
-        pulseSubLightAt(visIdx);
+    // Sub fires for non-quarter subdivisions (lights may be hidden for quarters anyway)
+    if (subEnabled){
+      const lights = $$('.sub-light', subLightsWrap);
+      const visibleCount = lights.length || 1;
+      const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
 
-        subCounter++;
-      }
+      const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+      if (s === 2) trigger(nextSubTime, 'subAccent');
+      else if (s === 1) trigger(nextSubTime, 'sub');
+      pulseSubLightAt(visIdx);
+
+      subCounter++;
     }
   }
+}
+
 
   function start(){
     if (isRunning) return;
