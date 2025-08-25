@@ -309,3 +309,34 @@ body{
   }
 }
 
+/* Make main lights behave like subs: stacked rows, centered, never overflow */
+.metro-lights{
+  display: flex;           /* instead of grid auto-flow columns */
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  margin: 16px 0;
+}
+.metro-lights .main-row{
+  display: grid;
+  grid-auto-flow: column;
+  gap: 20px;
+  width: max-content;
+  margin-inline: auto;
+}
+
+/* iOS slider wrapper takes the layout role of the slider */
+@media (min-width:701px){
+  .tempo-row.transport-eq .slider-wrap{
+    flex: 1 1 auto;
+    min-width: 280px;
+  }
+}
+@media (max-width:700px){
+  .tempo-row.transport-eq .slider-wrap{
+    grid-column: 1 / -1;   /* put slider on row 2, full width */
+    grid-row: 2;
+    min-width: 0;
+  }
+}
+
