@@ -1,6 +1,6 @@
-/* === METRONOME — iOS-safe: start works, thumb-only slider, pressed visuals on tap;
-       main lights wrap like subs; quarter-note subs silent; phase-locked scheduler;
-       numerator auto-set: denom=3→3, denom=2→4, else unchanged. === */
+/* === METRONOME — iOS-first fixes: one-tap start, pre-rendered clicks for crisp sound,
+       smooth main-light transitions, thumb-only slider; main lights wrap to 2 rows;
+       quarter-note subs silent; numerator auto-set: denom=3→3, denom=2→4, else unchanged. === */
 document.addEventListener('DOMContentLoaded', () => {
   const $  = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundTrigger  = $('#soundTrigger');
 
   const lightsWrap    = $('#metroLights'); // main lights
-  const subLightsWrap = $('#subLights');   // subdivision lights container
+  const subLightsWrap = $('#subLights');   // subdivision lights
 
   try { if (playBtn) playBtn.type = 'button'; } catch {}
   [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn].forEach(el=>{
@@ -41,16 +41,25 @@ document.addEventListener('DOMContentLoaded', () => {
     try { el.style.touchAction = 'manipulation'; } catch {}
   });
 
-  /* ---------------- Pressed visuals (works on iOS) ---------------- */
-  const pressStyle = document.createElement('style');
-  pressStyle.textContent = `
+  /* ---------------- Pressed visuals + smoother transitions ---------------- */
+  const uiStyle = document.createElement('style');
+  uiStyle.textContent = `
     .btn.is-pressing { filter: brightness(.92); transform: translateY(1px); }
     .btn--orange.is-pressing{ background: var(--orange-d); }
     .btn--purple.is-pressing{ background: var(--purple-d); }
-    .selector.is-pressing { filter: brightness(.94); }
-    .picker__close.is-pressing { filter: brightness(.9); transform: scale(.98); }
+    .selector.is-pressing, .picker__close.is-pressing { filter: brightness(.94); }
+    /* Smoother color transitions for main metro lights on iOS */
+    .metro-light{
+      will-change: background-color, border-color, box-shadow, transform;
+      transition: background-color 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
+      backface-visibility: hidden;
+      transform: translateZ(0);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .metro-light.is-hit { transition: none; }
+    .main-row, .sub-row { display: grid; gap: var(--light-gap, 10px); }
   `;
-  document.head.appendChild(pressStyle);
+  document.head.appendChild(uiStyle);
 
   function wirePressedVisual(el){
     if (!el) return;
@@ -68,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
   [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn,
    tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(wirePressedVisual);
 
-  // Enable :active-like behavior globally on iOS
+  // Enable :active-like behavior on iOS
   document.addEventListener('touchstart', function(){}, { passive:true });
 
   /* ================= iOS slider fix (thumb-only) ================= */
@@ -89,11 +98,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const shield = document.createElement('div');
     Object.assign(shield.style, {
-      position: 'absolute',
-      inset: '0',
-      background: 'transparent',
-      zIndex: '5',
-      touchAction: 'none'
+      position: 'absolute', inset: '0',
+      background: 'transparent', zIndex: '5', touchAction: 'none'
     });
     wrap.appendChild(shield);
 
@@ -238,7 +244,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
   const getBpm = ()=>clampInt(bpmRange.value,0,400);
 
-  // Parse subdivision as "a/b" or "n"
   function getSubdivParts(){
     const raw = (subdivSel?.value ?? '1/1').trim().replace(/\s+/g,'');
     if (raw.includes('/')){
@@ -497,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subLightsWrap) $$('.sub-light', subLightsWrap).forEach(el=>el.classList.remove('is-hit'));
   }
 
-  // Re-render when containers resize
+  // Resize re-render
   if ('ResizeObserver' in window){
     if (lightsWrap){
       const ro1 = new ResizeObserver(()=> renderLights());
@@ -521,8 +526,8 @@ document.addEventListener('DOMContentLoaded', () => {
     rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
   }
 
-  /* ---------------- Audio (no compressor) ---------------- */
-  let audioCtx=null, master=null;
+  /* ---------------- Audio ---------------- */
+  let audioCtx=null, master=null, __audioUnlocked=false;
 
   function ensureCtx(){
     if (!audioCtx){
@@ -537,8 +542,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // One-time unlock on first gesture (needed on iOS/Safari)
-  let __audioUnlocked=false;
+  // Pre-rendered click sample cache for oscillator presets (for crisp/identical hits)
+  let sampleCache = {}; // { presetName: { sr, accent:AudioBuffer, beat:..., sub:..., subAccent:... } }
+
+  function renderWaveSample(freq, shape, dur, sr){
+    const len = Math.max(1, Math.floor(dur * sr));
+    const data = new Float32Array(len);
+    const twoPI = Math.PI * 2;
+    const attack = Math.max(1, Math.floor(0.0008 * sr)); // ~0.8ms
+    const tConst = dur * 0.22; // decay constant
+    for (let i=0;i<len;i++){
+      const t = i / sr;
+      const phase = twoPI * freq * t;
+      let x;
+      switch (shape) {
+        case 'square':   x = Math.sign(Math.sin(phase)) || 1; break;
+        case 'triangle': x = 2/Math.PI * Math.asin(Math.sin(phase)); break;
+        case 'sawtooth': {
+          const frac = (freq * t) % 1;
+          x = 2 * frac - 1;
+          break;
+        }
+        default:         x = Math.sin(phase);
+      }
+      // simple fast-attack exponential decay envelope
+      const env = i < attack ? (i/attack) : Math.exp(-t / tConst);
+      data[i] = x * env;
+    }
+    const buf = (audioCtx ? audioCtx : { createBuffer:()=>null }).createBuffer?.(1, len, sr);
+    if (buf) buf.copyToChannel(data, 0);
+    return buf;
+  }
+
+  function ensurePresetSamples(){
+    if (!audioCtx) return;
+    const chosen = (soundSel?.value || 'beep');
+    if (!/^(beep|click|analog)$/.test(chosen)) return; // others use procedural (wood/clave)
+    const sr = audioCtx.sampleRate || 48000;
+    const cached = sampleCache[chosen];
+    if (cached && cached.sr === sr) return;
+
+    const p = presets[chosen] || presets.beep;
+    const out = { sr };
+    ['accent','beat','sub','subAccent'].forEach(k=>{
+      const spec = p[k] || p.beat;
+      const [freq, shape, dur] = spec;
+      out[k] = renderWaveSample(freq, shape || 'sine', dur, sr);
+    });
+    sampleCache[chosen] = out;
+  }
+
+  // One-time unlock on first gesture (iOS/Safari)
   function setupAudioUnlock(){
     if (__audioUnlocked) return;
     const events = ['pointerdown','touchend','mousedown','keydown','click'];
@@ -553,15 +607,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const b = audioCtx.createBuffer(1, 1, 22050);
         const src = audioCtx.createBufferSource();
         src.buffer = b; src.connect(master); src.start(0);
-      } catch {}
-
-      try {
-        const o = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
-        o.connect(g).connect(master);
-        o.start();
-        o.stop(audioCtx.currentTime + 0.01);
       } catch {}
 
       __audioUnlocked = true;
@@ -607,6 +652,17 @@ document.addEventListener('DOMContentLoaded', () => {
     v.gain.setValueAtTime(gainMul * kindScale(kind === 'subAccent' ? 'sub' : kind) * (presetLevel[chosen]||1), time);
     v.connect(master);
 
+    // Use pre-rendered buffers for oscillator presets
+    const bank = sampleCache[chosen];
+    if (bank && bank[kind] instanceof AudioBuffer){
+      const src = audioCtx.createBufferSource();
+      src.buffer = bank[kind];
+      src.connect(v);
+      src.start(time);
+      return;
+    }
+
+    // Procedural for wood/clave (kept as-is)
     if (freq === 'wood' || freq === 'wood-hi'){
       const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
       const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
@@ -639,6 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // Fallback oscillator path (if no buffer yet)
     const osc = audioCtx.createOscillator();
     const env = audioCtx.createGain();
     osc.type = shape || 'sine';
@@ -775,9 +832,10 @@ document.addEventListener('DOMContentLoaded', () => {
   async function robustResume(){
     ensureCtx();
     if (!audioCtx) return false;
+    // Build samples for current preset using actual sampleRate (fast)
+    ensurePresetSamples();
     try { await audioCtx.resume(); } catch {}
     if (audioCtx.state !== 'running'){
-      // Nudge with a silent tick and try again (iOS oddities)
       try {
         const b = audioCtx.createBuffer(1, 1, 22050);
         const s = audioCtx.createBufferSource();
@@ -786,6 +844,23 @@ document.addEventListener('DOMContentLoaded', () => {
       try { await audioCtx.resume(); } catch {}
     }
     return audioCtx.state === 'running';
+  }
+
+  /* ---------- Fast-press helper to avoid click/touch double-fire ---------- */
+  function addFastPress(el, handler){
+    if (!el) return;
+    let suppressClickUntil = 0;
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button != null && e.button !== 0) return;
+      suppressClickUntil = performance.now() + 350;
+      handler(e);
+    }, { passive:true });
+    el.addEventListener('click', (e) => {
+      if (performance.now() < suppressClickUntil) {
+        e.preventDefault(); e.stopPropagation(); return;
+      }
+      handler(e);
+    });
   }
 
   async function start(){
@@ -797,7 +872,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (playBtn) { playBtn.textContent = 'Stop'; playBtn.setAttribute('aria-pressed','true'); }
 
     alignToGrid(true);
-    schedule(); // schedule immediately so first click is guaranteed
+    schedule(); // schedule immediately
     if (scheduleTimer) clearInterval(scheduleTimer);
     scheduleTimer = setInterval(schedule, lookaheadMs);
   }
@@ -806,6 +881,11 @@ document.addEventListener('DOMContentLoaded', () => {
     clearInterval(scheduleTimer); scheduleTimer=null; isRunning=false;
     if (playBtn) { playBtn.textContent = 'Start'; playBtn.setAttribute('aria-pressed','false'); }
     alignToGrid(true);
+  }
+
+  // Use fast-press for the Start button (prevents iOS two-tap behavior)
+  if (playBtn){
+    addFastPress(playBtn, (e)=>{ e.preventDefault?.(); e.stopPropagation?.(); isRunning ? stop() : start(); });
   }
 
   /* ---------------- Tap tempo ---------------- */
@@ -825,6 +905,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isRunning) alignToGrid(false);
     }
   }
+  tapBtn && tapBtn.addEventListener('click', onTap);
 
   /* ---------------- UI sync ---------------- */
   function setBpmUI(val){
@@ -846,14 +927,6 @@ document.addEventListener('DOMContentLoaded', () => {
   bpmDec5Btn && bpmDec5Btn.addEventListener('click', ()=>stepBpm(-5));
   bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
   bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
-
-  // Also wire touchstart for immediate response on iOS
-  if (playBtn){
-    const toggle = (e)=>{ e.preventDefault(); e.stopPropagation(); isRunning ? stop() : start(); };
-    playBtn.addEventListener('click', toggle);
-    playBtn.addEventListener('touchstart', toggle, { passive:false });
-  }
-  tapBtn && tapBtn.addEventListener('click', onTap);
 
   bpmRange && bpmRange.addEventListener('input', e=>{
     setBpmUI(e.target.value);
@@ -906,6 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   soundSel && soundSel.addEventListener('change', ()=>{
     if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+    ensurePresetSamples(); // update buffers for new preset
     alignToGrid(true);
   });
 
@@ -959,12 +1033,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
     if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
 
+    // Build samples early (for crisp first click); if AudioContext not ready yet,
+    // they'll be built on first start().
+    ensureCtx(); if (audioCtx) ensurePresetSamples();
+
     alignToGrid(true); // start at first; quarters have no sub audio
   }
   [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
   window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
 
-  // iOS/Safari: unlock on first gesture, and resume when returning to foreground
   setupAudioUnlock();
   document.addEventListener('visibilitychange', ()=>{
     if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running'){
