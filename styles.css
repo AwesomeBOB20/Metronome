@@ -1,291 +1,810 @@
-@import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400&display=swap');
+/* === METRONOME — centered, equal-width two-row subs; tri-state sub lights; distinct sub accents; phase-locked clocks;
+       reset-to-first on stop/changes; hide subs lights for quarters (1/1) but KEEP quarter subs audible; auto-set TS numerator (3 for x/3, else 4) === */
+document.addEventListener('DOMContentLoaded', () => {
+  const $ = (s,root=document)=>root.querySelector(s);
+  const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
+  const root = $('#metronome'); if (!root) return;
 
-/* === Theme === */
-:root{
-  --black:#000; --white:#fff;
-  --bg:#1c1c1c;
+  if (window.__METRO_BOUND__) return;
+  window.__METRO_BOUND__ = true;
 
-  /* Oranges */
-  --orange:#d35400;
-  --orange-d:#c25227;   /* hover */
-  --orange-dim:#a84300;
+  // Elements
+  const playBtn = $('#metroPlay');
+  const tapBtn = $('#tapTempoBtn');
 
-  /* Purple & Blues */
-  --purple:#96318d; --purple-d:#81227a; --purple-dim:#752070;
-  --blue:#058890;  --blue-d:#04767e;   --blue-dim:#03656b; /* NONE color */
+  const bpmDec1Btn = $('#bpmDec1');
+  const bpmDec5Btn = $('#bpmDec5');
+  const bpmInc1Btn = $('#bpmInc1');
+  const bpmInc5Btn = $('#bpmInc5');
 
-  --gray-1:#ddd; --gray-3:#53525d;
-}
+  const bpmRange = $('#metroBpmRange');
+  const bpmInput = $('#metroBpmInput');
+  const bpmDisplay = $('#metroBpmValue');
 
-/* === Base === */
-*{ box-sizing:border-box; }
-html, body{ font-family:'Ubuntu',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-weight:400; }
-body{
-  margin:0;
-  background:var(--bg);
-  color:#fff;
-  font-size:18px;
-  padding:0; /* was padding-top:20px */
-}
+  const tsNum = $('#metroTSNum');
+  const tsDen = $('#metroTSDen');
+  const subdivSel = $('#metroSubdivision');
+  const soundSel = $('#metroSound');
 
-/* Kill the old mobile override too (was 16px) */
-@media (max-width:700px){
-  body{ padding-top:0; }
-}.container{ width:92%; max-width:900px; margin:10px auto; text-align:center; }
-.page-center{ display:block; min-height:unset; padding:8px 0; }
+  const tsNumTrigger = $('#tsNumTrigger');
+  const tsDenTrigger = $('#tsDenTrigger');
+  const subdivTrigger = $('#subdivTrigger');
+  const soundTrigger = $('#soundTrigger');
 
-/* === Buttons (default 44px) === */
-.btn{
-  height:44px; display:inline-flex; align-items:center; justify-content:center;
-  border:2px solid var(--black); color:#fff; font-size:1.05rem;
-  padding:6px 12px; border-radius:6px; cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent;
-}
-.btn--orange{ background:var(--orange); }
-.btn--orange:hover{ background:var(--orange-d); }
-.btn--purple{ background:var(--purple); }
-.btn--purple:hover{ background:var(--purple-d); }
-.btn:disabled{ background:var(--orange-dim); cursor:not-allowed; }
-.btn-square{ width:44px; height:44px; padding:0; }
+  const lightsWrap = $('#metroLights');   // main lights
+const subLightsWrap = $('#subLights');  // subdivision lights container
 
-/* Start & Tap match BPM input width (desktop) */
-#metroPlay, #tapTempoBtn{ min-width:7rem; white-space:nowrap; }
+/* iOS detect + thumb-only slider behavior (prevents slider from “owning” other buttons) */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+if (IS_IOS) document.documentElement.classList.add('is-ios');
 
-/* === Select triggers & Inputs === */
-.selector{
-  width:11rem; max-width:100%; height:40px;
-  padding:6px 10px; font-size:1.05rem;
-  border:2px solid var(--black); border-radius:6px;
-  color:#fff; background:var(--orange); text-align:left;
-}
-.selector--orange{ background:var(--orange); }
+if (IS_IOS && bpmRange){
+  let dragging = false, lastPid = null;
 
-/* Compact TS widgets (numerator & denominator) */
-.ts-compact{ width:5.2ch; min-width:0; text-align:center; padding-left:8px; padding-right:8px; }
-
-.visually-hidden{
-  position:absolute !important; left:-9999px !important; top:auto !important;
-  width:1px !important; height:1px !important; overflow:hidden !important;
-}
-
-.tempo-input{
-  width:7rem; height:44px; padding:8px; font-size:1.1rem;
-  border:2px solid var(--black); border-radius:6px;
-  background:#fff; color:#000; text-align:center;
-}
-.metro-label{ color:#fff; font-size:1.1rem; }
-.metro-slash{ color:#fff; font-weight:700; font-size:1.3rem; }
-
-/* === Slider (purple fill left side) === */
-.slider-fill{
-  --thumb:24px;
-  width:100%; height:12px; border-radius:6px;
-  box-shadow:inset 0 0 0 2px var(--black);
-  background:linear-gradient(to right,var(--purple) 0 0) no-repeat var(--bg-pos,0/0%), var(--gray-1);
-  -webkit-appearance:none; appearance:none;
-}
-.slider-fill::-webkit-slider-thumb{
-  -webkit-appearance:none; width:var(--thumb); height:var(--thumb);
-  background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
-}
-.slider-fill::-moz-range-thumb{
-  width:var(--thumb); height:var(--thumb);
-  background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
-}
-
-/* === Panel & display === */
-.metro-panel{ width:100%; margin:0 auto; background:transparent; border:none; }
-.metro-display{ display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:20px; }
-.bpm-line{ display:flex; align-items:center; justify-content:center; gap:20px; width:auto; }
-.bpm-stack{ display:flex; flex-direction:column; gap:20px; }
-.metro-bpm{ font-size:8rem; line-height:1; color:#fff; }
-#metroBpmValue{ display:inline-block; padding:0; border:0; border-radius:0; }
-
-/* Sections & cards */
-.metro-stack{ display:flex; flex-direction:column; gap:20px; }
-.card{ padding:12px; border-radius:12px; border:2px solid var(--black); background:var(--blue); box-sizing:border-box; }
-.metro-row{ display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:center; }
-
-/* === Tempo row (card #1) === */
-.tempo-row{ align-items:center; }
-.transport-eq .btn, .transport-eq .tempo-input{ min-width:7rem; }
-.tempo-row #metroBpmRange{ flex:1 1 480px; min-width:220px; }
-
-/* Make ONLY the buttons in card #1 40px tall on all viewports */
-.tempo-row.transport-eq .btn{ height:40px; }
-
-/* Desktop: card #1 is one row: Start · Slider · BPM · Tap */
-@media (min-width:701px){
-  .tempo-row.transport-eq{
-    display:flex; flex-wrap:nowrap; align-items:center; gap:20px;
+  function endDrag(){
+    dragging = false;
+    try {
+      if (lastPid != null && bpmRange.releasePointerCapture) {
+        bpmRange.releasePointerCapture(lastPid);
+      }
+    } catch {}
+    bpmRange.blur && bpmRange.blur();
+    lastPid = null;
   }
-  .tempo-row.transport-eq #metroBpmRange{
-    flex:1 1 auto; min-width:280px;
+
+  bpmRange.addEventListener('pointerdown', e=>{
+    dragging = true;
+    lastPid = e.pointerId;
+    bpmRange.setPointerCapture && bpmRange.setPointerCapture(e.pointerId);
+  });
+
+  // If you start a new pointer down anywhere else, release the slider immediately
+  document.addEventListener('pointerdown', e=>{
+    if (e.target !== bpmRange) endDrag();
+  }, true);
+
+  // End drag on any “up/cancel”
+  ['pointerup','pointercancel','mouseup','touchend','touchcancel'].forEach(ev=>{
+    document.addEventListener(ev, endDrag, true);
+  });
+}
+
+/* ---------------- Picker Modal ---------------- */
+const pickerRoot = $('#pickerRoot');
+const pickerTitle = $('#pickerTitle');
+
+  const pickerClose = $('#pickerClose');
+  const pickerSearch = $('#pickerSearch');
+  const pickerList = $('#pickerList');
+  let activeSelect = null, activeTrigger = null;
+
+  function openPicker(trigger, selectEl, titleText){
+    activeSelect = selectEl;
+    activeTrigger = trigger;
+    if (pickerTitle) pickerTitle.textContent = titleText || 'Select';
+    if (pickerSearch) pickerSearch.value = '';
+    renderPickerList('');
+    if (pickerRoot) pickerRoot.hidden = false;
+    document.body.classList.add('modal-open');
+    pickerSearch && pickerSearch.focus({preventScroll:true});
+  }
+  function closePicker(){
+    if (pickerRoot) pickerRoot.hidden = true;
+    document.body.classList.remove('modal-open');
+    activeSelect = null; activeTrigger = null;
+  }
+  function renderPickerList(filter){
+    if (!pickerList || !activeSelect) return;
+    pickerList.innerHTML = '';
+    const opts = [...activeSelect.options];
+    const q = (filter||'').trim().toLowerCase();
+    opts.forEach((opt, idx)=>{
+      const txt = opt.text || opt.value;
+      if (q && !txt.toLowerCase().includes(q)) return;
+      const li = document.createElement('li');
+      li.className = 'picker__item' + (idx===activeSelect.selectedIndex ? ' is-active':'');
+      li.textContent = txt;
+      li.setAttribute('role','option');
+      li.addEventListener('click', ()=>{
+        activeSelect.value = opt.value || txt;
+        activeSelect.dispatchEvent(new Event('change', {bubbles:true}));
+        if (activeTrigger) activeTrigger.value = txt;
+        closePicker();
+      });
+      pickerList.appendChild(li);
+    });
+  }
+  pickerClose && pickerClose.addEventListener('click', closePicker);
+  pickerSearch && pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
+  function attachPicker(trigger){
+    const selectId = trigger.getAttribute('data-picker');
+    const title = trigger.getAttribute('data-title') || 'Select';
+    const sel = $('#'+selectId);
+    if (!sel) return;
+    trigger.value = sel.options[sel.selectedIndex]?.text || '';
+    trigger.addEventListener('click', ()=> openPicker(trigger, sel, title));
+  }
+  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+
+  /* ---------------- Helpers ---------------- */
+  const EPS = 1e-6;
+  const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
+  const getBpm = ()=>clampInt(bpmRange.value,0,400);
+
+  // Parse subdivision as "a/b" or "n" (treat "0" as none)
+  function getSubdivParts(){
+    const raw = (subdivSel?.value ?? '1/1').trim().replace(/\s+/g,'');
+    if (raw.includes('/')){
+      const [aStr,bStr] = raw.split('/');
+      const a = Number(aStr), b = Number(bStr);
+      return { a: (isFinite(a)?a:0), b: (isFinite(b)?b:1), raw };
+    }
+    const n = Number(raw);
+    return { a: (isFinite(n)?n:1), b: 1, raw };
+  }
+  function getSubdivRatio(){
+    const {a,b} = getSubdivParts();
+    if (b <= 0) return 0;
+    const r = a / b;
+    return r >= 0 ? r : 0;
+  }
+  // Visible sub lights count = numerator "a"
+  function subsLightsCount(){
+    const {a} = getSubdivParts();
+    return Math.max(0, Math.floor(a)); // 0 hides
+  }
+  function hasDenominator3(){
+    const {b} = getSubdivParts();
+    return b === 3;
+  }
+  function isQuartersSubdiv(){
+    const {a,b} = getSubdivParts();
+    return a === 1 && b === 1; // 1/1 (quarters)
+  }
+
+  /* ---------------- Main lights (0 none, 1 normal, 2 accent) ---------------- */
+  let beatStates = [];
+  function defaultBeatStates(){
+    const beats = clampInt(tsNum.value,1,12);
+    const arr = new Array(beats).fill(1);
+    if (beats>0) arr[0]=2;
+    return arr;
+  }
+  function renderLights(){
+    lightsWrap.innerHTML = '';
+    const beats = clampInt(tsNum.value,1,12);
+    if (!beatStates.length || beatStates.length !== beats) beatStates = defaultBeatStates();
+    for(let i=0;i<beats;i++){
+      const d = document.createElement('div');
+      d.className = 'metro-light';
+      applyBeatClass(d, beatStates[i]);
+      d.title = 'Click: Normal → Accent → None';
+      d.addEventListener('click', ()=>{
+        beatStates[i] = (beatStates[i] === 1) ? 2 : (beatStates[i] === 2 ? 0 : 1);
+        applyBeatClass(d, beatStates[i]);
+      });
+      lightsWrap.appendChild(d);
+    }
+  }
+  function applyBeatClass(el, state){
+    el.classList.remove('is-accent','is-beat','is-muted','is-hit');
+    if (state===2) el.classList.add('is-accent');
+    else if (state===1) el.classList.add('is-beat');
+    else el.classList.add('is-muted');
+  }
+
+  /* ---------------- Sub lights (0 none, 1 normal, 2 accent) ---------------- */
+  let subStates = [];
+  function defaultSubStates(n){ return new Array(Math.max(0, n|0)).fill(1); }
+
+  // Create up to two centered rows that never overflow; both rows use identical cell width
+  function renderSubLights(){
+    if (!subLightsWrap) return;
+
+    // Hide subs lights entirely for quarters (1/1) — audio is attached to main beats
+if (isQuartersSubdiv()){
+  subLightsWrap.hidden = true;
+  subLightsWrap.innerHTML = '';
+  subStates = [];
+  return;
+}
+
+
+    const n = subsLightsCount();
+
+    if (n <= 0){
+      subLightsWrap.hidden = true;
+      subLightsWrap.innerHTML = '';
+      subStates = [];
+      return;
+    }
+
+    subLightsWrap.hidden = false;
+
+    // Ensure state array length
+    if (!subStates.length || subStates.length !== n) subStates = defaultSubStates(n);
+
+    // Measure container and decide single-row vs two-row
+    const cw = subLightsWrap.clientWidth || subLightsWrap.getBoundingClientRect().width || 0;
+    const style = getComputedStyle(subLightsWrap);
+    const gap = parseFloat(style.gap || '20') || 20;
+    const MIN_CELL = 28; // px
+
+    const fitsSingleRow = (count)=> {
+      if (count <= 0) return true;
+      const totalGaps = gap * Math.max(0, count-1);
+      const cellW = (cw - totalGaps) / count;
+      return cellW >= MIN_CELL;
+    };
+
+    subLightsWrap.innerHTML = '';
+
+    if (fitsSingleRow(n)){
+      // --- Single centered row ---
+      const row = document.createElement('div');
+      row.className = 'sub-row';
+
+      // per-cell px so row gets a real width we can center
+      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
+      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
+      row.style.width = 'max-content';
+      row.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'sub-light';
+        applySubClass(d, subStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
+          applySubClass(d, subStates[i]);
+        });
+        row.appendChild(d);
+      }
+      subLightsWrap.appendChild(row);
+
+    } else {
+      // --- Two centered rows; equal cell width on both rows; counts split as evenly as possible
+      let topCount  = Math.ceil(n/2);
+      let bottomCount = n - topCount;
+
+      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
+      if (topCount > maxPerRow) { topCount = maxPerRow; bottomCount = n - topCount; }
+      if (bottomCount > maxPerRow){
+        bottomCount = maxPerRow;
+        topCount = n - bottomCount;
+      }
+
+      const maxCount = Math.max(topCount, bottomCount);
+      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
+
+      const rowTop = document.createElement('div');
+      rowTop.className = 'sub-row';
+      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
+      rowTop.style.width = 'max-content';
+      rowTop.style.marginInline = 'auto';
+
+      const rowBottom = document.createElement('div');
+      rowBottom.className = 'sub-row';
+      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
+      rowBottom.style.width = 'max-content';
+      rowBottom.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'sub-light';
+        applySubClass(d, subStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
+          applySubClass(d, subStates[i]);
+        });
+        (i < topCount ? rowTop : rowBottom).appendChild(d);
+      }
+
+      subLightsWrap.appendChild(rowTop);
+      subLightsWrap.appendChild(rowBottom);
+    }
+  }
+
+  function applySubClass(el, state){
+    el.classList.remove('is-on','is-accent','is-muted','is-hit');
+    if (state===2) el.classList.add('is-accent');
+    else if (state===1) el.classList.add('is-on');
+    else el.classList.add('is-muted');
+  }
+
+  function pulseLight(beatIndex){
+    const lights = $$('.metro-light', lightsWrap);
+    lights.forEach((el,i)=>{
+      el.classList.toggle('is-hit', i===beatIndex);
+      if (i===beatIndex) setTimeout(()=>el.classList.remove('is-hit'), 60);
+    });
+  }
+  function pulseSubLightAt(i){
+    if (!subLightsWrap || subLightsWrap.hidden) return;
+    const lights = $$('.sub-light', subLightsWrap);
+    if (!lights.length) return;
+    const n = lights.length;
+    const idx = ((i % n) + n) % n;
+    if (subStates[idx] !== 0){
+      lights[idx].classList.add('is-hit');
+      setTimeout(()=>lights[idx].classList.remove('is-hit'), 60);
+    }
+  }
+  function clearHitClasses(){
+    $$('.metro-light', lightsWrap).forEach(el=>el.classList.remove('is-hit'));
+    if (subLightsWrap) $$('.sub-light', subLightsWrap).forEach(el=>el.classList.remove('is-hit'));
+  }
+
+  /* Re-render subs when the container resizes */
+  if (subLightsWrap && 'ResizeObserver' in window){
+    const ro = new ResizeObserver(()=> renderSubLights());
+    ro.observe(subLightsWrap);
+  } else {
+    window.addEventListener('resize', renderSubLights);
+  }
+
+  /* ---------------- Slider fill ---------------- */
+  function updateSliderFill(rangeEl){
+    const min = parseFloat(rangeEl.min||'0');
+    const max = parseFloat(rangeEl.max||'100');
+    const val = parseFloat(rangeEl.value||'0');
+    const pct = ((val-min)*100)/(max-min);
+    rangeEl.style.setProperty('--bg-pos', pct+'% 100%');
+    rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
+  }
+
+  /* ---------------- Audio (with iOS unlock) ---------------- */
+  let audioCtx=null, master=null, comp=null, __audioUnlocked=false;
+
+  function ensureCtx(){
+    if (!audioCtx){
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new Ctx({ latencyHint: 'interactive' });
+      } catch (_) { return; }
+
+      master = audioCtx.createGain();
+      master.gain.value = 0.9;
+
+      comp = audioCtx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-18, audioCtx.currentTime);
+      comp.knee.setValueAtTime(20, audioCtx.currentTime);
+      comp.ratio.setValueAtTime(6, audioCtx.currentTime);
+      comp.attack.setValueAtTime(0.002, audioCtx.currentTime);
+      comp.release.setValueAtTime(0.10, audioCtx.currentTime);
+      master.connect(comp).connect(audioCtx.destination);
+    }
+  }
+
+  // One-time unlock on first gesture (needed on iOS/Safari)
+  function setupAudioUnlock(){
+    if (__audioUnlocked) return;
+    const events = ['pointerdown','touchend','mousedown','keydown','click'];
+    const unlockOnce = () => {
+      ensureCtx();
+      if (!audioCtx) return;
+
+      try { audioCtx.resume && audioCtx.resume(); } catch {}
+
+      // Fire a tiny, inaudible tick so iOS registers a gesture-started sound
+      try {
+        const b = audioCtx.createBuffer(1, 1, 22050);
+        const src = audioCtx.createBufferSource();
+        src.buffer = b; src.connect(master); src.start(0);
+      } catch {}
+
+      try {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        o.connect(g).connect(master);
+        o.start();
+        o.stop(audioCtx.currentTime + 0.01);
+      } catch {}
+
+      __audioUnlocked = true;
+      events.forEach(ev=>document.removeEventListener(ev, unlockOnce, true));
+    };
+    events.forEach(ev=>document.addEventListener(ev, unlockOnce, true));
+  }
+
+  const presets = {
+    beep: {
+      accent:[1760,'sine',0.020], beat:[880,'sine',0.018],
+      sub:[440,'sine',0.012], subAccent:[660,'triangle',0.014]
+    },
+    click: {
+      accent:[3000,'triangle',0.008], beat:[2500,'square',0.006],
+      sub:[2000,'square',0.004], subAccent:[2200,'sawtooth',0.006]
+    },
+    wood: {
+      accent:['wood',null,0.028], beat:['wood',null,0.022],
+      sub:['wood',null,0.016], subAccent:['wood-hi',null,0.018]
+    },
+    clave: {
+      accent:['clave',null,0.028], beat:['clave',null,0.020],
+      sub:['clave',null,0.014], subAccent:['clave-soft',null,0.016]
+    },
+    analog: {
+      accent:[1200,'sawtooth',0.020], beat:[900,'sawtooth',0.016],
+      sub:[700,'sawtooth',0.012], subAccent:[1000,'square',0.014]
+    },
+  };
+  const presetLevel = { beep:1.00, click:1.00, wood:1.00, clave:1.00, analog:1.00 };
+  const kindScale = k => k==='accent'?1.0 : k==='beat'?0.8 : 0.6;
+
+  function trigger(time, kind, gainMul=1){
+    const chosen = (soundSel?.value || 'beep');
+    const p = (presets[chosen] || presets.beep);
+    const spec = p[kind] || (kind==='subAccent' ? p.sub : null) || p.beat;
+    const [freq, shape, dur] = spec;
+    if (!audioCtx || !master) return;
+
+    const v = audioCtx.createGain();
+    v.gain.setValueAtTime(gainMul * kindScale(kind === 'subAccent' ? 'sub' : kind) * (presetLevel[chosen]||1), time);
+    v.connect(master);
+
+    if (freq === 'wood' || freq === 'wood-hi'){
+      const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+      const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i=0;i<n;i++) data[i] = (Math.random()*2-1) * Math.exp(-i/(n*0.22));
+      const src = audioCtx.createBufferSource(); src.buffer = buffer;
+      const bp = audioCtx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = (freq === 'wood-hi') ? 2200 : 1550;
+      bp.Q.value = (freq === 'wood-hi') ? 4.0 : 3.2;
+      src.connect(bp).connect(v);
+      src.start(time);
+      return;
+    }
+    if (freq === 'clave' || freq === 'clave-soft'){
+      const o1 = audioCtx.createOscillator();
+      const o2 = audioCtx.createOscillator();
+      if (freq === 'clave'){
+        o1.type='square';   o1.frequency.setValueAtTime(2350, time);
+        o2.type='triangle'; o2.frequency.setValueAtTime(1180, time);
+      } else {
+        o1.type='triangle'; o1.frequency.setValueAtTime(2050, time);
+        o2.type='sine';     o2.frequency.setValueAtTime(980, time);
+      }
+      const g  = audioCtx.createGain();
+      g.gain.setValueAtTime(1.0, time);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+      o1.connect(g); o2.connect(g); g.connect(v);
+      o1.start(time); o2.start(time);
+      o1.stop(time + dur); o2.stop(time + dur);
+      return;
+    }
+
+    const osc = audioCtx.createOscillator();
+    const env = audioCtx.createGain();
+    osc.type = shape || 'sine';
+    osc.frequency.setValueAtTime(freq, time);
+    env.gain.setValueAtTime(1.0, time);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(env).connect(v);
+    osc.start(time);
+    osc.stop(time + dur);
+  }
+
+  /* ---------------- Scheduler (phase + reset management) ---------------- */
+  let isRunning=false;
+  let currentBeatInBar=0;
+
+  // Absolute integer counters to avoid float drift
+  let beatCounter=0;
+  let subCounter=0;
+
+  let nextBeatTime=0;
+  let nextSubTime=0;
+  let subIndex=0; // kept for compatibility with UI calc
+  let scheduleTimer=null;
+  let gridT0 = 0; // phase anchor for both rows
+
+  const lookaheadMs = 25;
+  const scheduleAheadTime = 0.12;
+
+  function secondsPerBeat(){
+    const bpm = getBpm();
+    const den = clampInt(tsDen.value,1,16);
+    return bpm>0 ? 60.0/bpm * (4/den) : Infinity;
+  }
+
+  function alignToGrid(resetToFirst=false){
+    if (!audioCtx) return;
+
+    const now   = audioCtx.currentTime;
+    const spb   = secondsPerBeat();
+    const ratio = getSubdivRatio();
+    const beatsPerBar = clampInt(tsNum.value,1,12);
+
+    if (resetToFirst){
+  gridT0 = now + 0.05;       // common anchor
+  beatCounter = 0;
+  subCounter  = 0;
+  currentBeatInBar = 0;
+
+  nextBeatTime = gridT0;
+  // For quarters (1/1) we attach subs to the main beat; don't schedule subs independently
+  if (ratio > EPS && !isQuartersSubdiv()){
+    nextSubTime = gridT0;
+    subIndex = 0;
+  } else {
+    nextSubTime = Infinity;
+    subIndex = 0;
+  }
+  clearHitClasses();
+  return;
+}
+
+
+    const anchor = gridT0 || (now + 0.05);
+
+    // snap next BEAT to the first multiple of spb after "now"
+    beatCounter = Math.ceil((now - anchor - EPS) / spb);
+    if (beatCounter < 0) beatCounter = 0;
+    nextBeatTime = anchor + beatCounter * spb;
+    currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
+
+    // snap next SUB to the first multiple of subInterval after "now" (quarters allowed)
+    if (ratio > EPS){
+      const subInterval = spb / ratio;
+      subCounter = Math.ceil((now - anchor - EPS) / subInterval);
+      if (subCounter < 0) subCounter = 0;
+      nextSubTime = anchor + subCounter * subInterval;
+    } else {
+      nextSubTime = Infinity;
+      subCounter  = 0;
+      subIndex    = 0;
+    }
+    clearHitClasses();
+  }
+
+  function schedule(){
+  const spb   = secondsPerBeat();
+  if (!isFinite(spb)) return;
+
+  const ratio = getSubdivRatio();
+  const isQuarter = isQuartersSubdiv();
+
+  // Independent sub scheduler only for non-quarter subdivisions
+  const subEnabled   = (ratio > EPS) && !isQuarter;
+  const subInterval  = subEnabled ? (spb / ratio) : Infinity;
+
+  const beatsPerBar  = clampInt(tsNum.value,1,12);
+  const anchor       = gridT0;
+  const horizon      = audioCtx.currentTime + scheduleAheadTime;
+
+  while (true){
+    // Recompute absolute times from integer counters (phase-locked)
+    nextBeatTime = anchor + beatCounter * spb;
+    if (nextBeatTime < audioCtx.currentTime - EPS){
+      beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
+      nextBeatTime = anchor + beatCounter * spb;
+    }
+
+    nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
+    if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
+      subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
+      nextSubTime = anchor + subCounter * subInterval;
+    }
+
+    const tNext = Math.min(nextBeatTime, nextSubTime);
+    if (tNext >= horizon) break;
+
+    // Beat fires
+    if (nextBeatTime <= nextSubTime + EPS){
+      const state = beatStates[currentBeatInBar] ?? 1;
+
+      if (state !== 0){
+        // Main beat (accent or normal)
+        trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+        // For QUARTER subdivision: also play the normal subdivision sound with the beat
+        if (isQuarter){
+          trigger(nextBeatTime, 'sub'); // always normal sub, even on accent
+        }
+        pulseLight(currentBeatInBar);
+      }
+      // If state === 0 (muted), quarters' sub drops out with it (nothing to trigger)
+
+      beatCounter++;
+      currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+      continue;
+    }
+
+    // Sub fires for non-quarter subdivisions (lights may be hidden for quarters anyway)
+    if (subEnabled){
+      const lights = $$('.sub-light', subLightsWrap);
+      const visibleCount = lights.length || 1;
+      const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
+
+      const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+      if (s === 2) trigger(nextSubTime, 'subAccent');
+      else if (s === 1) trigger(nextSubTime, 'sub');
+      pulseSubLightAt(visIdx);
+
+      subCounter++;
+    }
   }
 }
 
-/* Mobile: row1 = Start | BPM | Tap, row2 = Slider */
-@media (max-width:700px){
-  .tempo-row.transport-eq{
-    display:grid; grid-template-columns: repeat(3, minmax(0,1fr));
-    grid-auto-rows: min-content; gap:20px; align-items:center; width:100%;
+
+  function start(){
+    if (isRunning) return;
+    ensureCtx();
+    try { if (audioCtx && audioCtx.state !== 'running') audioCtx.resume(); } catch {}
+    if (getBpm() === 0){ return; }
+    isRunning = true;
+    playBtn && (playBtn.textContent = 'Stop');
+    playBtn && playBtn.setAttribute('aria-pressed','true');
+
+    alignToGrid(true); // first light on start
+    if (scheduleTimer) clearInterval(scheduleTimer);
+    scheduleTimer = setInterval(schedule, lookaheadMs);
   }
-  .tempo-row.transport-eq .btn,
-  .tempo-row.transport-eq .tempo-input{
-    width:100%; min-width:0;
+  function stop(){
+    if (!isRunning) return;
+    clearInterval(scheduleTimer); scheduleTimer=null; isRunning=false;
+    playBtn && (playBtn.textContent = 'Start');
+    playBtn && playBtn.setAttribute('aria-pressed','false');
+
+    alignToGrid(true); // reset both rows to first on pause
   }
-  #metroPlay, #tapTempoBtn{ min-width:0; }
-  .tempo-row.transport-eq #metroBpmRange{
-    grid-column:1 / -1; grid-row:2; min-width:0;
+
+  /* ---------------- Tap tempo ---------------- */
+  const TAP_RESET_MS = 1500;
+  let tapTimes = [];
+  function onTap(){
+    const nowTs = performance.now();
+    if (tapTimes.length && (nowTs - tapTimes[tapTimes.length - 1]) > TAP_RESET_MS) tapTimes = [];
+    tapTimes.push(nowTs);
+    if (tapTimes.length > 4) tapTimes.shift();
+    if (tapTimes.length === 4){
+      const [t0,t1,t2,t3] = tapTimes;
+      const ivals = [t1-t0, t2-t1, t3-t2].sort((a,b)=>a-b);
+      const ms = ivals[1];
+      const bpm = clampInt(Math.round(60000 / ms), 0, 400);
+      setBpmUI(bpm);
+      if (isRunning) alignToGrid(false);
+    }
   }
-}
 
-/* === Lights (main row) === */
-.metro-lights{
-  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(28px,1fr);
-  gap:20px; width:100%; margin:16px 0; /* requested 16px */
-}
-.metro-light{
-  height:48px; border:3px solid var(--black); border-radius:16px; background:var(--gray-1);
-  box-shadow:none; transform:scaleY(1); transition:transform .05s linear, background .05s linear, opacity .05s linear; cursor:pointer;
-}
-.metro-light.is-accent{ background:var(--purple); }
-.metro-light.is-beat{   background:var(--orange); }
-.metro-light.is-muted{  background:var(--blue-dim); opacity:1; }
-.metro-light.is-hit{ transform:scaleY(1.15); }
-
-/* === Subdivision lights container (never overflow; up to two balanced rows, centered) === */
-.metro-lights--subs{
-  display:flex;
-  flex-direction:column;
-  gap:20px;               /* requested subs gap */
-  width:100%;
-  margin:10px 0;
-}
-.metro-lights--subs .sub-row{
-  display:grid;
-  grid-auto-flow:column;
-  gap:20px;               /* keep spacing consistent within a row */
-  width:max-content;      /* row shrinks to its content so centering works */
-  margin-inline:auto;     /* center row when narrower than container */
-}
-
-/* Sub light visuals: tri-state; hit only animates (no color swap) */
-.sub-light{
-  height:16px;
-  border:3px solid var(--black);
-  border-radius:16px;
-  background:var(--orange);           /* default look (on) */
-  transition:transform .05s linear, background .05s linear;
-  cursor:pointer;
-}
-.sub-light.is-on{      background:var(--orange); }   /* normal */
-.sub-light.is-accent{  background:var(--purple); }   /* accent */
-.sub-light.is-muted{   background:var(--blue-dim); } /* none (same as main) */
-.sub-light.is-hit{ transform:scaleY(1.15); }
-
-/* === Config rows (card #2) — DESKTOP one line, items fill their columns === */
-.control-lines{ display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:center; }
-.control-line{ display:flex; align-items:center; gap:20px; }
-.control-inputs{ display:flex; align-items:center; gap:20px; }
-
-@media (min-width:701px){
-  .control-lines{
-    display:grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap:20px;
-    align-items:center;
-    width:100%;
+  /* ---------------- UI sync ---------------- */
+  function setBpmUI(val){
+    const v = clampInt(val,0,400);
+    bpmRange && (bpmRange.value = String(v));
+    bpmInput && (bpmInput.value = String(v));
+    bpmDisplay && (bpmDisplay.textContent = String(v));
+    bpmRange && updateSliderFill(bpmRange);
   }
-  .control-line{
-    display:grid;
-    grid-template-columns: auto 1fr;
-    gap:12px;
-    align-items:center;
-    width:100%;
-    white-space:nowrap;
+  function stepBpm(delta){
+    setBpmUI(getBpm() + delta);
+    if (isRunning){
+      if (getBpm()===0) { stop(); return; }
+      alignToGrid(false);
+    }
   }
-  .control-inputs{
-    justify-self:stretch; display:flex; align-items:center; gap:12px; width:100%;
+
+  bpmDec1Btn && bpmDec1Btn.addEventListener('click', ()=>stepBpm(-1));
+  bpmDec5Btn && bpmDec5Btn.addEventListener('click', ()=>stepBpm(-5));
+  bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
+  bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
+
+  playBtn && playBtn.addEventListener('click', e=>{ e.preventDefault(); isRunning ? stop() : start(); });
+  tapBtn && tapBtn.addEventListener('click', onTap);
+
+  bpmRange && bpmRange.addEventListener('input', e=>{
+    setBpmUI(e.target.value);
+    if (isRunning){
+      if (getBpm()===0) { stop(); return; }
+      alignToGrid(false);
+    }
+  });
+  bpmInput && bpmInput.addEventListener('input', e=>{
+    setBpmUI(e.target.value||0);
+    if (isRunning) alignToGrid(false);
+  });
+
+  // Auto-set TS numerator based on subdivision; re-render + reset
+  function autoSetNumeratorBySubdivision(){
+    const targetNum = hasDenominator3() ? '3' : '4';
+    if (tsNum && tsNum.value !== targetNum){
+      tsNum.value = targetNum;
+      if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || targetNum;
+    }
   }
-  .control-inputs > .selector{ width:100%; }
-  .control-inputs.ts .selector.ts-compact{ width:5.2ch; }
-}
 
-/* Mobile (unchanged) */
-@media (max-width:700px){
-  .control-lines{ flex-direction:column; align-items:stretch; gap:20px; }
-  .control-line{ justify-content:space-between; width:100%; }
-  .control-line .metro-label{ text-align:left; }
-  .control-inputs{ justify-content:flex-end; }
-}
+  // Setting changes
+  [tsNum, tsDen, subdivSel].forEach(el=> el && el.addEventListener('change', ()=>{
+    if (el === subdivSel){
+      if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+      autoSetNumeratorBySubdivision();
+    } else if (el === tsNum){
+      if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    } else if (el === tsDen){
+      if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    }
 
-/* === Picker Overlay (modal) === */
-.picker{
-  position:fixed; inset:0; display:flex; align-items:flex-start; justify-content:center;
-  --picker-inline-pad: 4vw; padding: var(--picker-inline-pad);
-  background:rgba(0,0,0,.35);
-  backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%);
-  z-index:9999; animation: picker-fade-in .18s ease-out;
-}
-.picker[hidden]{ display:none !important; }
-.picker__panel{
-  width:min(520px, 100%); background:transparent; border:none; box-shadow:none; padding:0;
-  display:grid; grid-template-rows:auto 1fr; gap:10px; animation: panel-pop .22s cubic-bezier(.2,.8,.2,1); overscroll-behavior:contain;
-}
-.picker__header{
-  display:grid; grid-template-columns:1fr 40px; grid-template-areas:"title close" "search search";
-  align-items:center; gap:8px 10px; padding:8px; border:2px solid var(--black); border-radius:10px;
-}
-.picker--orange .picker__header{ background:var(--orange); }
-.picker__title{ grid-area:title; margin:0; font-size:1.2rem; line-height:1.2; color:#fff; }
-.picker__close{ grid-area:close; width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; font-size:1.4rem; line-height:1; cursor:pointer; background:#fff; color:#000; border:2px solid var(--black); border-radius:10px; }
-.picker__search{ grid-area:search; width:100%; height:40px; font-size:1rem; padding:6px 10px; background:#fff; color:#000; border:2px solid var(--black); border-radius:10px; }
-.picker__list{
-  list-style:none; margin:0; padding:6px; border:2px solid var(--black); border-radius:10px;
-  overflow-y:auto; max-height:calc(82vh - 80px); box-shadow:0 8px 24px rgba(0,0,0,.45);
-  background:var(--orange);
-}
-.picker__item{
-  padding:10px 12px; cursor:pointer; color:#fff; border-radius:5px; transition:none; touch-action:manipulation;
-}
-@media (hover:hover) and (pointer:fine){
-  .picker__item:hover{ background:var(--gray-3); }
-}
-.picker--orange .picker__item.is-active{ background:#fff; color:var(--orange); }
+    beatStates = defaultBeatStates();
+    renderLights();
 
-/* Interaction guards */
-.picker__list, .picker__item{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-.selector, .selector:focus{ -webkit-user-select:none; user-select:none; caret-color:transparent; }
-.picker, .picker *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; caret-color:transparent; }
-.picker .picker__search, .picker .picker__search *{ -webkit-user-select:text !important; user-select:text !important; caret-color:auto !important; }
+    const n = subsLightsCount();
+    subStates = n > 0 ? defaultSubStates(n) : [];
+    renderSubLights();
 
-/* Animations */
-@keyframes picker-fade-in{ from{ opacity:0; } to{ opacity:1; } }
-@keyframes panel-pop{ from{ opacity:0; transform:translateY(12px) scale(.98); } to{ opacity:1; transform:translateY(0) scale(1); } }
+    alignToGrid(true); // reset to first on any change
+  }));
 
-/* Responsive type */
-@media (max-width:900px){ .metro-bpm{ font-size:6.2rem; } }
-@media (max-width:700px){
-  .bpm-line{ margin:20px 0; }
-}
+  soundSel && soundSel.addEventListener('change', ()=>{
+    if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+    alignToGrid(true); // reset to first on sound change too
+  });
 
-/* Disable hover on coarse pointers */
-@media (hover:none) and (pointer:coarse){
-  .btn--orange:hover{ background:var(--orange); }
-  .btn--purple:hover{ background:var(--purple); }
-}
+  // Keyboard (Space toggle; arrows adjust BPM; Shift = ±5)
+  document.addEventListener('keydown', (e)=>{
+    if (pickerRoot && !pickerRoot.hidden) return;
+    const tag = (e.target.tagName||'').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    if (typing) return;
 
-/* Match BPM input height to 40px */
-.tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
+    if (e.code === 'Space' && !e.altKey && !e.ctrlKey && !e.metaKey){
+      e.preventDefault(); e.stopPropagation();
+      isRunning ? stop() : start();
+      return;
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? -5 : -1);
+    }
+  });
+  bpmRange && bpmRange.addEventListener('keydown', e=>{
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation(); stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation(); stepBpm(e.shiftKey ? -5 : -1);
+    }
+  });
 
+  /* ---------------- Init ---------------- */
+  const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep' };
+  function applyDefaultsOnLoad(){
+    setBpmUI(defaults.bpm);
+    if (tsNum) tsNum.value = defaults.tsNum;
+    if (tsDen) tsDen.value = defaults.tsDen;
+    if (subdivSel) subdivSel.value = defaults.subdiv;
+    if (soundSel) soundSel.value = defaults.sound;
+    if (bpmRange) updateSliderFill(bpmRange);
 
-/* Optional: visible keyboard focus */
-.btn:focus-visible,
-.selector:focus-visible,
-.picker__close:focus-visible {
-  outline:3px solid #fff;
-  outline-offset:2px;
-}
+    beatStates = defaultBeatStates();
+    renderLights();
 
-/* Optional: give the app a bit of breathing room without shifting the whole page */
-.container{ margin:16px auto; } /* was 10px */
+    const n = subsLightsCount();
+    subStates = n > 0 ? defaultSubStates(n) : [];
+    renderSubLights();
+
+    if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
+
+    alignToGrid(true); // start state: first light ready
+  }
+  [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
+  window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
+
+  // iOS/Safari helpers: unlock on first gesture, and resume when returning to foreground
+  setupAudioUnlock();
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running'){
+      try { audioCtx.resume(); } catch {}
+    }
+  });
+
+  applyDefaultsOnLoad();
+});
