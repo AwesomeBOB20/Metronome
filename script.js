@@ -202,13 +202,14 @@ const pickerTitle = $('#pickerTitle');
   function renderSubLights(){
     if (!subLightsWrap) return;
 
-    // Hide subs lights entirely for quarters (1/1) — audio is attached to main beats
+    // Hide subs lights entirely for quarters (1/1) — and no sub audio for quarters
 if (isQuartersSubdiv()){
   subLightsWrap.hidden = true;
   subLightsWrap.innerHTML = '';
   subStates = [];
   return;
 }
+
 
 
     const n = subsLightsCount();
@@ -528,7 +529,7 @@ if (isQuartersSubdiv()){
   currentBeatInBar = 0;
 
   nextBeatTime = gridT0;
-  // For quarters (1/1) we attach subs to the main beat; don't schedule subs independently
+  // No independent sub scheduling for quarters (1/1)
   if (ratio > EPS && !isQuartersSubdiv()){
     nextSubTime = gridT0;
     subIndex = 0;
@@ -539,6 +540,7 @@ if (isQuartersSubdiv()){
   clearHitClasses();
   return;
 }
+
 
 
     const anchor = gridT0 || (now + 0.05);
@@ -570,7 +572,7 @@ if (isQuartersSubdiv()){
   const ratio = getSubdivRatio();
   const isQuarter = isQuartersSubdiv();
 
-  // Independent sub scheduler only for non-quarter subdivisions
+  // Disable sub scheduler for quarters (1/1)
   const subEnabled   = (ratio > EPS) && !isQuarter;
   const subInterval  = subEnabled ? (spb / ratio) : Infinity;
 
@@ -579,43 +581,24 @@ if (isQuartersSubdiv()){
   const horizon      = audioCtx.currentTime + scheduleAheadTime;
 
   while (true){
-    // Recompute absolute times from integer counters (phase-locked)
-    nextBeatTime = anchor + beatCounter * spb;
-    if (nextBeatTime < audioCtx.currentTime - EPS){
-      beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
-      nextBeatTime = anchor + beatCounter * spb;
-    }
-
-    nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
-    if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
-      subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
-      nextSubTime = anchor + subCounter * subInterval;
-    }
-
+    // ...
     const tNext = Math.min(nextBeatTime, nextSubTime);
     if (tNext >= horizon) break;
 
     // Beat fires
     if (nextBeatTime <= nextSubTime + EPS){
       const state = beatStates[currentBeatInBar] ?? 1;
-
       if (state !== 0){
-        // Main beat (accent or normal)
         trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
-        // For QUARTER subdivision: also play the normal subdivision sound with the beat
-        if (isQuarter){
-          trigger(nextBeatTime, 'sub'); // always normal sub, even on accent
-        }
+        // NOTE: For quarters, we do NOT play any subdivision sound
         pulseLight(currentBeatInBar);
       }
-      // If state === 0 (muted), quarters' sub drops out with it (nothing to trigger)
-
       beatCounter++;
       currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
       continue;
     }
 
-    // Sub fires for non-quarter subdivisions (lights may be hidden for quarters anyway)
+    // Sub fires (non-quarter subdivisions only)
     if (subEnabled){
       const lights = $$('.sub-light', subLightsWrap);
       const visibleCount = lights.length || 1;
