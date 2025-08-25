@@ -1,5 +1,5 @@
 /* === METRONOME — centered, equal-width two-row subs; tri-state sub lights; distinct sub accents; phase-locked clocks;
-       reset-to-first on stop/changes; hide subs lights for quarters (1/1) but KEEP quarter subs audible; auto-set TS numerator (3 for x/3, else 4) === */
+       reset-to-first on stop/changes; hide subs lights for quarters (1/1) and DISABLE quarter sub audio; auto-set TS numerator (3 for x/3, else 4) === */
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -32,48 +32,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const soundTrigger = $('#soundTrigger');
 
   const lightsWrap = $('#metroLights');   // main lights
-const subLightsWrap = $('#subLights');  // subdivision lights container
+  const subLightsWrap = $('#subLights');  // subdivision lights container
 
-/* iOS detect + thumb-only slider behavior (prevents slider from “owning” other buttons) */
-const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-               (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
-if (IS_IOS) document.documentElement.classList.add('is-ios');
-
-if (IS_IOS && bpmRange){
-  let dragging = false, lastPid = null;
-
-  function endDrag(){
-    dragging = false;
-    try {
-      if (lastPid != null && bpmRange.releasePointerCapture) {
-        bpmRange.releasePointerCapture(lastPid);
-      }
-    } catch {}
-    bpmRange.blur && bpmRange.blur();
-    lastPid = null;
-  }
-
-  bpmRange.addEventListener('pointerdown', e=>{
-    dragging = true;
-    lastPid = e.pointerId;
-    bpmRange.setPointerCapture && bpmRange.setPointerCapture(e.pointerId);
-  });
-
-  // If you start a new pointer down anywhere else, release the slider immediately
-  document.addEventListener('pointerdown', e=>{
-    if (e.target !== bpmRange) endDrag();
-  }, true);
-
-  // End drag on any “up/cancel”
-  ['pointerup','pointercancel','mouseup','touchend','touchcancel'].forEach(ev=>{
-    document.addEventListener(ev, endDrag, true);
-  });
-}
-
-/* ---------------- Picker Modal ---------------- */
-const pickerRoot = $('#pickerRoot');
-const pickerTitle = $('#pickerTitle');
-
+  /* ---------------- Picker Modal ---------------- */
+  const pickerRoot = $('#pickerRoot');
+  const pickerTitle = $('#pickerTitle');
   const pickerClose = $('#pickerClose');
   const pickerSearch = $('#pickerSearch');
   const pickerList = $('#pickerList');
@@ -132,7 +95,7 @@ const pickerTitle = $('#pickerTitle');
   const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
   const getBpm = ()=>clampInt(bpmRange.value,0,400);
 
-  // Parse subdivision as "a/b" or "n" (treat "0" as none)
+  // Parse subdivision as "a/b" or "n"
   function getSubdivParts(){
     const raw = (subdivSel?.value ?? '1/1').trim().replace(/\s+/g,'');
     if (raw.includes('/')){
@@ -152,7 +115,7 @@ const pickerTitle = $('#pickerTitle');
   // Visible sub lights count = numerator "a"
   function subsLightsCount(){
     const {a} = getSubdivParts();
-    return Math.max(0, Math.floor(a)); // 0 hides
+    return Math.max(0, Math.floor(a));
   }
   function hasDenominator3(){
     const {b} = getSubdivParts();
@@ -203,14 +166,12 @@ const pickerTitle = $('#pickerTitle');
     if (!subLightsWrap) return;
 
     // Hide subs lights entirely for quarters (1/1) — and no sub audio for quarters
-if (isQuartersSubdiv()){
-  subLightsWrap.hidden = true;
-  subLightsWrap.innerHTML = '';
-  subStates = [];
-  return;
-}
-
-
+    if (isQuartersSubdiv()){
+      subLightsWrap.hidden = true;
+      subLightsWrap.innerHTML = '';
+      subStates = [];
+      return;
+    }
 
     const n = subsLightsCount();
 
@@ -427,7 +388,7 @@ if (isQuartersSubdiv()){
     },
     clave: {
       accent:['clave',null,0.028], beat:['clave',null,0.020],
-      sub:['clave',null,0.014], subAccent:['clave-soft',null,0.016]
+      sub:[440,'triangle',0.014], subAccent:[980,'sine',0.016] // soft alt
     },
     analog: {
       accent:[1200,'sawtooth',0.020], beat:[900,'sawtooth',0.016],
@@ -523,25 +484,23 @@ if (isQuartersSubdiv()){
     const beatsPerBar = clampInt(tsNum.value,1,12);
 
     if (resetToFirst){
-  gridT0 = now + 0.05;       // common anchor
-  beatCounter = 0;
-  subCounter  = 0;
-  currentBeatInBar = 0;
+      gridT0 = now + 0.05;       // common anchor
+      beatCounter = 0;
+      subCounter  = 0;
+      currentBeatInBar = 0;
 
-  nextBeatTime = gridT0;
-  // No independent sub scheduling for quarters (1/1)
-  if (ratio > EPS && !isQuartersSubdiv()){
-    nextSubTime = gridT0;
-    subIndex = 0;
-  } else {
-    nextSubTime = Infinity;
-    subIndex = 0;
-  }
-  clearHitClasses();
-  return;
-}
-
-
+      nextBeatTime = gridT0;
+      // No independent sub scheduling for quarters (1/1)
+      if (ratio > EPS && !isQuartersSubdiv()){
+        nextSubTime = gridT0;
+        subIndex = 0;
+      } else {
+        nextSubTime = Infinity;
+        subIndex = 0;
+      }
+      clearHitClasses();
+      return;
+    }
 
     const anchor = gridT0 || (now + 0.05);
 
@@ -551,7 +510,7 @@ if (isQuartersSubdiv()){
     nextBeatTime = anchor + beatCounter * spb;
     currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
 
-    // snap next SUB to the first multiple of subInterval after "now" (quarters allowed)
+    // snap next SUB to the first multiple of subInterval after "now"
     if (ratio > EPS){
       const subInterval = spb / ratio;
       subCounter = Math.ceil((now - anchor - EPS) / subInterval);
@@ -566,54 +525,65 @@ if (isQuartersSubdiv()){
   }
 
   function schedule(){
-  const spb   = secondsPerBeat();
-  if (!isFinite(spb)) return;
+    const spb   = secondsPerBeat();
+    if (!isFinite(spb)) return;
 
-  const ratio = getSubdivRatio();
-  const isQuarter = isQuartersSubdiv();
+    const ratio = getSubdivRatio();
+    const isQuarter = isQuartersSubdiv();
 
-  // Disable sub scheduler for quarters (1/1)
-  const subEnabled   = (ratio > EPS) && !isQuarter;
-  const subInterval  = subEnabled ? (spb / ratio) : Infinity;
+    // Disable sub scheduler for quarters (1/1)
+    const subEnabled   = (ratio > EPS) && !isQuarter;
+    const subInterval  = subEnabled ? (spb / ratio) : Infinity;
 
-  const beatsPerBar  = clampInt(tsNum.value,1,12);
-  const anchor       = gridT0;
-  const horizon      = audioCtx.currentTime + scheduleAheadTime;
+    const beatsPerBar  = clampInt(tsNum.value,1,12);
+    const anchor       = gridT0;
+    const horizon      = audioCtx.currentTime + scheduleAheadTime;
 
-  while (true){
-    // ...
-    const tNext = Math.min(nextBeatTime, nextSubTime);
-    if (tNext >= horizon) break;
-
-    // Beat fires
-    if (nextBeatTime <= nextSubTime + EPS){
-      const state = beatStates[currentBeatInBar] ?? 1;
-      if (state !== 0){
-        trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
-        // NOTE: For quarters, we do NOT play any subdivision sound
-        pulseLight(currentBeatInBar);
+    while (true){
+      // Recompute absolute times from integer counters (phase-locked)
+      nextBeatTime = anchor + beatCounter * spb;
+      if (nextBeatTime < audioCtx.currentTime - EPS){
+        beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
+        nextBeatTime = anchor + beatCounter * spb;
       }
-      beatCounter++;
-      currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
-      continue;
-    }
 
-    // Sub fires (non-quarter subdivisions only)
-    if (subEnabled){
-      const lights = $$('.sub-light', subLightsWrap);
-      const visibleCount = lights.length || 1;
-      const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
+      nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
+      if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
+        subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
+        nextSubTime = anchor + subCounter * subInterval;
+      }
 
-      const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
-      if (s === 2) trigger(nextSubTime, 'subAccent');
-      else if (s === 1) trigger(nextSubTime, 'sub');
-      pulseSubLightAt(visIdx);
+      const tNext = Math.min(nextBeatTime, nextSubTime);
+      if (tNext >= horizon) break;
 
-      subCounter++;
+      // Beat fires
+      if (nextBeatTime <= nextSubTime + EPS){
+        const state = beatStates[currentBeatInBar] ?? 1;
+        if (state !== 0){
+          trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+          // For quarters, we do NOT schedule sub audio at all.
+          pulseLight(currentBeatInBar);
+        }
+        beatCounter++;
+        currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+        continue;
+      }
+
+      // Sub fires (non-quarter subdivisions only)
+      if (subEnabled){
+        const lights = $$('.sub-light', subLightsWrap);
+        const visibleCount = lights.length || 1; // if lights hidden, still tick audio path (but here subEnabled=>not quarters so lights should exist)
+        const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
+
+        const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+        if (s === 2) trigger(nextSubTime, 'subAccent');
+        else if (s === 1) trigger(nextSubTime, 'sub');
+        pulseSubLightAt(visIdx);
+
+        subCounter++;
+      }
     }
   }
-}
-
 
   function start(){
     if (isRunning) return;
@@ -753,6 +723,98 @@ if (isQuartersSubdiv()){
       e.preventDefault(); e.stopPropagation(); stepBpm(e.shiftKey ? -5 : -1);
     }
   });
+
+  /* ===== iOS-only slider guards (thumb-only shield + blur on outside tap) ===== */
+  (function iosSliderGuards(){
+    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!isiOS || !bpmRange) return;
+
+    // 1) Blur the BPM slider when tapping anywhere else (prevents “global slider” capture)
+    function defocusBpm(){
+      if (bpmRange && document.activeElement === bpmRange) bpmRange.blur();
+    }
+    document.addEventListener('pointerdown', (e)=>{
+      if (e.target !== bpmRange) defocusBpm();
+    }, { capture:true, passive:true });
+
+    // 2) Transparent shield: only allow drags that start near the thumb
+    const wrap = document.createElement('div');
+    wrap.style.position='relative';
+    wrap.style.display='block';
+    wrap.style.width='100%';
+    bpmRange.parentNode.insertBefore(wrap, bpmRange);
+    wrap.appendChild(bpmRange);
+
+    const shield = document.createElement('div');
+    Object.assign(shield.style, {
+      position:'absolute', inset:'0', background:'transparent', zIndex:'5', touchAction:'none'
+    });
+    wrap.appendChild(shield);
+
+    const THUMB_RADIUS = 24; // px
+    let dragging = false;
+
+    function thumbCenterX(){
+      const rect = bpmRange.getBoundingClientRect();
+      const min  = Number(bpmRange.min) || 0;
+      const max  = Number(bpmRange.max) || 100;
+      const v    = Number(bpmRange.value) || 0;
+      const pct  = (v - min) / (max - min || 1);
+      return rect.left + pct * rect.width;
+    }
+    function setFromClientX(clientX){
+      const rect = bpmRange.getBoundingClientRect();
+      const x    = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+      const min  = Number(bpmRange.min) || 0;
+      const max  = Number(bpmRange.max) || 100;
+      const val  = Math.round(min + (x / (rect.width || 1)) * (max - min));
+      bpmRange.value = String(val);
+      // Reuse existing input logic (updates number, slider fill, scheduler alignment)
+      bpmRange.dispatchEvent(new Event('input', { bubbles:true }));
+    }
+    function start(e){
+      const t = e.touches ? e.touches[0] : e;
+      const onThumb = Math.abs(t.clientX - thumbCenterX()) <= THUMB_RADIUS;
+
+      if (!onThumb){
+        // Ignore track taps; prevent iOS from promoting slider to “page-wide” controller
+        e.preventDefault();
+        e.stopPropagation();
+        defocusBpm();
+        return;
+      }
+
+      dragging = true;
+      e.preventDefault();
+      e.stopPropagation();
+      try { bpmRange.focus({ preventScroll:true }); } catch {}
+      move(e);
+
+      window.addEventListener('pointermove', move, { passive:false });
+      window.addEventListener('pointerup', end, { passive:true, once:true });
+      window.addEventListener('pointercancel', end, { passive:true, once:true });
+      window.addEventListener('touchmove', move, { passive:false });
+      window.addEventListener('touchend', end, { passive:true, once:true });
+      window.addEventListener('touchcancel', end, { passive:true, once:true });
+    }
+    function move(e){
+      if (!dragging) return;
+      const t = e.touches ? e.touches[0] : e;
+      setFromClientX(t.clientX);
+      e.preventDefault();
+    }
+    function end(){
+      if (!dragging) return;
+      dragging = false;
+      defocusBpm();
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('touchmove',   move);
+    }
+
+    shield.addEventListener('pointerdown', start, { passive:false });
+    shield.addEventListener('touchstart',  start, { passive:false });
+  })();
 
   /* ---------------- Init ---------------- */
   const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep' };
