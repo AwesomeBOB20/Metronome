@@ -1,8 +1,6 @@
-/* === METRONOME — centered, equal-width two-row subs & main lights; tri-state sub lights;
-       distinct sub accents; phase-locked clocks; reset-to-first on stop/changes;
-       quarter-note subdivision (1/1) has NO sub audio & NO sub lights; iOS thumb-only
-       tempo slider with wrapper; compressor removed; numerator auto-set:
-       denom=3 → 3, denom=2 → 4, else unchanged. === */
+/* === METRONOME — iOS-safe: start works, thumb-only slider, pressed visuals on tap;
+       main lights wrap like subs; quarter-note subs silent; phase-locked scheduler;
+       numerator auto-set: denom=3→3, denom=2→4, else unchanged. === */
 document.addEventListener('DOMContentLoaded', () => {
   const $  = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -38,6 +36,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const subLightsWrap = $('#subLights');   // subdivision lights container
 
   try { if (playBtn) playBtn.type = 'button'; } catch {}
+  [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn].forEach(el=>{
+    if (!el) return;
+    try { el.style.touchAction = 'manipulation'; } catch {}
+  });
+
+  /* ---------------- Pressed visuals (works on iOS) ---------------- */
+  const pressStyle = document.createElement('style');
+  pressStyle.textContent = `
+    .btn.is-pressing { filter: brightness(.92); transform: translateY(1px); }
+    .btn--orange.is-pressing{ background: var(--orange-d); }
+    .btn--purple.is-pressing{ background: var(--purple-d); }
+    .selector.is-pressing { filter: brightness(.94); }
+    .picker__close.is-pressing { filter: brightness(.9); transform: scale(.98); }
+  `;
+  document.head.appendChild(pressStyle);
+
+  function wirePressedVisual(el){
+    if (!el) return;
+    const add = ()=> el.classList.add('is-pressing');
+    const rm  = ()=> el.classList.remove('is-pressing');
+    el.addEventListener('pointerdown', add, { passive:true });
+    el.addEventListener('pointerup',   rm,  { passive:true });
+    el.addEventListener('pointercancel', rm, { passive:true });
+    el.addEventListener('pointerleave', rm, { passive:true });
+    el.addEventListener('touchstart',  add, { passive:true });
+    el.addEventListener('touchend',    rm,  { passive:true });
+    el.addEventListener('touchcancel', rm,  { passive:true });
+    el.addEventListener('click',       rm);
+  }
+  [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn,
+   tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(wirePressedVisual);
+
+  // Enable :active-like behavior globally on iOS
+  document.addEventListener('touchstart', function(){}, { passive:true });
 
   /* ================= iOS slider fix (thumb-only) ================= */
   const IS_IOS =
@@ -45,17 +77,16 @@ document.addEventListener('DOMContentLoaded', () => {
     (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
   if (IS_IOS) document.documentElement.classList.add('is-ios');
 
-  if (IS_IOS && bpmRange) {
-    // Wrap slider so layout can target the wrapper instead of the input
+  function installThumbOnlySlider(rangeEl){
+    if (!rangeEl) return;
     const wrap = document.createElement('div');
     wrap.className = 'slider-wrap';
     wrap.style.position = 'relative';
     wrap.style.display  = 'block';
     wrap.style.width    = '100%';
-    bpmRange.parentNode.insertBefore(wrap, bpmRange);
-    wrap.appendChild(bpmRange);
+    rangeEl.parentNode.insertBefore(wrap, rangeEl);
+    wrap.appendChild(rangeEl);
 
-    // Transparent shield: only allow drag when starting on the thumb
     const shield = document.createElement('div');
     Object.assign(shield.style, {
       position: 'absolute',
@@ -69,29 +100,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const THUMB_RADIUS = 24;
 
     function thumbCenterX() {
-      const rect = bpmRange.getBoundingClientRect();
-      const min  = Number(bpmRange.min) || 0;
-      const max  = Number(bpmRange.max) || 100;
-      const v    = Number(bpmRange.value) || 0;
+      const rect = rangeEl.getBoundingClientRect();
+      const min  = Number(rangeEl.min) || 0;
+      const max  = Number(rangeEl.max) || 100;
+      const v    = Number(rangeEl.value) || 0;
       const pct  = (v - min) / (max - min || 1);
       return rect.left + pct * rect.width;
     }
     function setFromClientX(clientX) {
-      const rect = bpmRange.getBoundingClientRect();
+      const rect = rangeEl.getBoundingClientRect();
       const x    = Math.min(Math.max(clientX - rect.left, 0), rect.width || 1);
-      const min  = Number(bpmRange.min) || 0;
-      const max  = Number(bpmRange.max) || 100;
+      const min  = Number(rangeEl.min) || 0;
+      const max  = Number(rangeEl.max) || 100;
       const val  = Math.round(min + (x / (rect.width || 1)) * (max - min));
-      bpmRange.value = String(val);
-      bpmRange.dispatchEvent(new Event('input', { bubbles: true }));
+      rangeEl.value = String(val);
+      rangeEl.dispatchEvent(new Event('input', { bubbles: true }));
     }
     function defocusSlider() {
-      if (document.activeElement === bpmRange) bpmRange.blur();
+      if (document.activeElement === rangeEl) rangeEl.blur();
     }
 
     document.addEventListener(
       'pointerdown',
-      (e) => { if (e.target !== bpmRange) defocusSlider(); },
+      (e) => { if (e.target !== rangeEl) defocusSlider(); },
       { capture: true, passive: true }
     );
 
@@ -110,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
       dragging = true;
       e.preventDefault();
       e.stopPropagation();
-      try { bpmRange.focus({ preventScroll:true }); } catch {}
+      try { rangeEl.focus({ preventScroll:true }); } catch {}
 
       move(e);
 
@@ -138,12 +169,13 @@ document.addEventListener('DOMContentLoaded', () => {
     shield.addEventListener('pointerdown', start, { passive:false });
     shield.addEventListener('touchstart',  start, { passive:false });
 
-    // Safety: block native jump-to-click if pointer hits the input itself
-    bpmRange.addEventListener('pointerdown', (e) => {
+    // Block native jump-to-click if pointer hits the input itself
+    rangeEl.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
     }, { passive:false });
   }
+  if (IS_IOS) installThumbOnlySlider(bpmRange);
 
   /* ---------------- Picker Modal ---------------- */
   const pickerRoot  = $('#pickerRoot');
@@ -245,7 +277,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return arr;
   }
 
-  // Create up to two centered rows that never overflow; both rows use identical cell width (like subs)
   function renderLights(){
     if (!lightsWrap) return;
 
@@ -269,7 +300,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const n = beats;
 
     if (fitsSingleRow(n)){
-      // single centered row
       const row = document.createElement('div');
       row.className = 'main-row';
       const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
@@ -290,7 +320,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       lightsWrap.appendChild(row);
     } else {
-      // two centered rows, balanced
       let topCount    = Math.ceil(n/2);
       let bottomCount = n - topCount;
 
@@ -494,6 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ---------------- Audio (no compressor) ---------------- */
   let audioCtx=null, master=null;
+
   function ensureCtx(){
     if (!audioCtx){
       try {
@@ -742,10 +772,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function start(){
-    if (isRunning) return;
+  async function robustResume(){
     ensureCtx();
-    try { if (audioCtx && audioCtx.state !== 'running') audioCtx.resume(); } catch {}
+    if (!audioCtx) return false;
+    try { await audioCtx.resume(); } catch {}
+    if (audioCtx.state !== 'running'){
+      // Nudge with a silent tick and try again (iOS oddities)
+      try {
+        const b = audioCtx.createBuffer(1, 1, 22050);
+        const s = audioCtx.createBufferSource();
+        s.buffer = b; s.connect(master); s.start(0);
+      } catch {}
+      try { await audioCtx.resume(); } catch {}
+    }
+    return audioCtx.state === 'running';
+  }
+
+  async function start(){
+    if (isRunning) return;
+    const ok = await robustResume();
+    if (!ok) return;
     if (getBpm() === 0){ return; }
     isRunning = true;
     if (playBtn) { playBtn.textContent = 'Stop'; playBtn.setAttribute('aria-pressed','true'); }
@@ -801,10 +847,12 @@ document.addEventListener('DOMContentLoaded', () => {
   bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
   bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
 
-  playBtn && playBtn.addEventListener('click', e=>{
-    e.preventDefault(); e.stopPropagation();
-    isRunning ? stop() : start();
-  });
+  // Also wire touchstart for immediate response on iOS
+  if (playBtn){
+    const toggle = (e)=>{ e.preventDefault(); e.stopPropagation(); isRunning ? stop() : start(); };
+    playBtn.addEventListener('click', toggle);
+    playBtn.addEventListener('touchstart', toggle, { passive:false });
+  }
   tapBtn && tapBtn.addEventListener('click', onTap);
 
   bpmRange && bpmRange.addEventListener('input', e=>{
@@ -894,8 +942,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function applyDefaultsOnLoad(){
     setBpmUI(defaults.bpm);
     if (tsNum)     tsNum.value     = defaults.tsNum;
-    if (tsDen)     tsDen.value     = defaults.tsDen;          // default denominator = 4
-    if (subdivSel) subdivSel.value = defaults.subdiv;         // quarters
+    if (tsDen)     tsDen.value     = defaults.tsDen;
+    if (subdivSel) subdivSel.value = defaults.subdiv;   // quarters
     if (soundSel)  soundSel.value  = defaults.sound;
     if (bpmRange)  updateSliderFill(bpmRange);
 
