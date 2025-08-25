@@ -340,3 +340,27 @@ body{
   }
 }
 
+/* Orange variant for volume sliders */
+.slider--orange{
+  background:linear-gradient(to right,var(--orange) 0 0) no-repeat var(--bg-pos,0/0%), var(--gray-1);
+}
+
+/* === Volume card — Mobile stacked; Desktop grid (label | slider | %) === */
+.volume-card{ display:flex; flex-direction:column; gap:16px; }
+.volume-card .volume-block{ display:flex; flex-direction:column; gap:10px; }
+.volume-card .metro-label{ text-align:left; }
+.volume-card .volume-row{ display:flex; align-items:center; gap:12px; width:100%; }
+.volume-card .volume-row .slider-fill{ flex:1 0 0%; min-width:0; }
+.volume-card .microtext{ flex:0 0 5.2ch; inline-size:5.2ch; text-align:right; font-variant-numeric:tabular-nums; font-size:0.95rem; }
+
+@media (min-width:701px){
+  .volume-card{
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) 5.2ch; /* label | slider | % */
+    column-gap:12px; row-gap:16px; align-items:center; width:100%;
+  }
+  .volume-card .volume-block, .volume-card .volume-row{ display:contents; }
+  .volume-card .volume-block > .metro-label{ grid-column:1; justify-self:start; white-space:nowrap; }
+  #mainVolRange, #subVolRange{ grid-column:2; width:100%; }
+  #mainVolValue, #subVolValue{ grid-column:3; justify-self:end; }
+}
