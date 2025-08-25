@@ -1,6 +1,10 @@
 /* === METRONOME — iOS-first fixes: one-tap start, pre-rendered clicks for crisp sound,
        smooth main-light transitions, thumb-only slider; main lights wrap to 2 rows;
-       quarter-note subs silent; numerator auto-set: denom=3→3, denom=2→4, else unchanged. === */
+       quarter-note subs silent; numerator auto-set: denom=3→3, denom=2→4, else unchanged.
+       + Beat/Sub volume sliders wired
+       + Picker: click-outside-to-close, Esc to close, hide list on no matches
+       + iOS first-tap audio unlock on Start
+       + Default Beat volume = 100% === */
 document.addEventListener('DOMContentLoaded', () => {
   const $  = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -34,6 +38,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const lightsWrap    = $('#metroLights'); // main lights
   const subLightsWrap = $('#subLights');   // subdivision lights
+
+  // Volume card elements (Beat/Sub)
+  const mainVolRange = $('#mainVolRange');
+  const mainVolValue = $('#mainVolValue');
+  const subVolRange  = $('#subVolRange');
+  const subVolValue  = $('#subVolValue');
 
   try { if (playBtn) playBtn.type = 'button'; } catch {}
   [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn].forEach(el=>{
@@ -181,7 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
       e.stopPropagation();
     }, { passive:false });
   }
-  if (IS_IOS) installThumbOnlySlider(bpmRange);
+  if (IS_IOS) installThumbOnlySlider(bpmRange); // keep BPM fix scoped to BPM slider
 
   /* ---------------- Picker Modal ---------------- */
   const pickerRoot  = $('#pickerRoot');
@@ -211,6 +221,8 @@ document.addEventListener('DOMContentLoaded', () => {
     pickerList.innerHTML = '';
     const opts = [...activeSelect.options];
     const q = (filter||'').trim().toLowerCase();
+
+    let added = 0;
     opts.forEach((opt, idx)=>{
       const txt = opt.text || opt.value;
       if (q && !txt.toLowerCase().includes(q)) return;
@@ -225,7 +237,17 @@ document.addEventListener('DOMContentLoaded', () => {
         closePicker();
       });
       pickerList.appendChild(li);
+      added++;
     });
+
+    // Hide list entirely if no matches
+    if (added === 0){
+      pickerList.hidden = true;
+      pickerList.style.display = 'none';
+    } else {
+      pickerList.hidden = false;
+      pickerList.style.display = '';
+    }
   }
   pickerClose && pickerClose.addEventListener('click', closePicker);
   pickerSearch && pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
@@ -235,11 +257,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const sel      = $('#'+selectId);
     if (!sel) return;
     trigger.value = sel.options[sel.selectedIndex]?.text || '';
-    trigger.addEventListener('click', ()=> openPicker(trigger, sel, title));
+    trigger.addEventListener('click', ()=>{
+      if (pickerRoot && !pickerRoot.hidden && activeTrigger === trigger){
+        closePicker(); // toggle close if already open for this trigger
+      } else {
+        openPicker(trigger, sel, title);
+      }
+    });
   }
   [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+  // Click-outside-to-close (robust) + Esc
+  const PANEL_SELECTOR = '.picker__panel, .picker-panel, .picker, [role="dialog"], [data-panel], [data-modal-panel]';
+  function getPickerPanel(){
+    return pickerRoot ? pickerRoot.querySelector(PANEL_SELECTOR) : null;
+  }
+  // Close when clicking ANYWHERE not inside the panel
+  document.addEventListener('pointerdown', (e)=>{
+    if (!pickerRoot || pickerRoot.hidden) return;
+    const panel = getPickerPanel();
+    if (panel && panel.contains(e.target)) return; // inside -> ignore
+    closePicker(); // outside -> close
+  }, { capture:true });
+  // Esc to close
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape' && pickerRoot && !pickerRoot.hidden) closePicker();
+  });
 
   /* ---------------- Helpers ---------------- */
+
   const EPS = 1e-6;
   const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
   const getBpm = ()=>clampInt(bpmRange.value,0,400);
@@ -518,12 +563,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* ---------------- Slider fill ---------------- */
   function updateSliderFill(rangeEl){
+    if (!rangeEl) return;
     const min = parseFloat(rangeEl.min||'0');
     const max = parseFloat(rangeEl.max||'100');
     const val = parseFloat(rangeEl.value||'0');
-    const pct = ((val-min)*100)/(max-min);
+    const pct = ((val-min)*100)/(max-min || 1);
     rangeEl.style.setProperty('--bg-pos', pct+'% 100%');
-    rangeEl.style.background = `linear-gradient(to right, var(--purple) 0%, var(--purple) ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
+    // Use color by class; default purple, orange for .slider--orange
+    const color = rangeEl.classList.contains('slider--orange') ? 'var(--orange)' : 'var(--purple)';
+    rangeEl.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
   }
 
   /* ---------------- Audio ---------------- */
@@ -592,27 +640,30 @@ document.addEventListener('DOMContentLoaded', () => {
     sampleCache[chosen] = out;
   }
 
-  // One-time unlock on first gesture (iOS/Safari)
+  // One-time unlock on first gesture (global)
   function setupAudioUnlock(){
     if (__audioUnlocked) return;
     const events = ['pointerdown','touchend','mousedown','keydown','click'];
     const unlockOnce = () => {
-      ensureCtx();
-      if (!audioCtx) return;
-
-      try { audioCtx.resume && audioCtx.resume(); } catch {}
-
-      // Tiny inaudible tick so iOS registers gesture-started sound
-      try {
-        const b = audioCtx.createBuffer(1, 1, 22050);
-        const src = audioCtx.createBufferSource();
-        src.buffer = b; src.connect(master); src.start(0);
-      } catch {}
-
-      __audioUnlocked = true;
+      gestureUnlock();
       events.forEach(ev=>document.removeEventListener(ev, unlockOnce, true));
     };
     events.forEach(ev=>document.addEventListener(ev, unlockOnce, true));
+  }
+
+  // Synchronous unlock used by Start button too
+  function gestureUnlock(){
+    if (__audioUnlocked) return;
+    ensureCtx();
+    if (!audioCtx) return;
+    try { audioCtx.resume && audioCtx.resume(); } catch {}
+    try {
+      // tiny silent tick helps Safari register audio output path
+      const b = audioCtx.createBuffer(1, 1, 22050);
+      const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+    } catch {}
+    ensurePresetSamples();
+    __audioUnlocked = true;
   }
 
   const presets = {
@@ -640,6 +691,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const presetLevel = { beep:1.00, click:1.00, wood:1.00, clave:1.00, analog:1.00 };
   const kindScale   = k => k==='accent'?1.0 : k==='beat'?0.8 : 0.6;
 
+  // === Volume state (Beat/Sub) ===
+  let mainVol = 1.00; // 0.0–1.5 after mapping; affects 'accent' & 'beat'
+  let subVol  = 0.80; // affects 'sub' & 'subAccent'
+
+  function sliderToLinear(v){
+    const t = Math.max(0, Math.min(100, Number(v)||0)) / 100;
+    // gentle loudness curve (more resolution at lower values)
+    return 1.5 * Math.pow(t, 0.7);
+  }
+  function updateMainVolFromUI(){
+    if (!mainVolRange) return;
+    mainVol = sliderToLinear(mainVolRange.value);
+    if (mainVolValue) mainVolValue.textContent = `${Math.round(Number(mainVolRange.value)||0)}%`;
+    updateSliderFill(mainVolRange);
+  }
+  function updateSubVolFromUI(){
+    if (!subVolRange) return;
+    subVol = sliderToLinear(subVolRange.value);
+    if (subVolValue) subVolValue.textContent = `${Math.round(Number(subVolRange.value)||0)}%`;
+    updateSliderFill(subVolRange);
+  }
+  if (mainVolRange) mainVolRange.addEventListener('input', updateMainVolFromUI);
+  if (subVolRange)  subVolRange.addEventListener('input',  updateSubVolFromUI);
+
   function trigger(time, kind, gainMul=1){
     const chosen = (soundSel?.value || 'beep');
     const p = (presets[chosen] || presets.beep);
@@ -649,7 +724,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const v = audioCtx.createGain();
     v.gain.cancelScheduledValues(time);
-    v.gain.setValueAtTime(gainMul * kindScale(kind === 'subAccent' ? 'sub' : kind) * (presetLevel[chosen]||1), time);
+
+    // Apply group volume: mainVol for accent/beat, subVol for sub/subAccent
+    const groupVol = (kind==='accent' || kind==='beat') ? mainVol : subVol;
+    const base = gainMul * groupVol * kindScale(kind === 'subAccent' ? 'sub' : kind) * (presetLevel[chosen]||1);
+    v.gain.setValueAtTime(base, time);
     v.connect(master);
 
     // Use pre-rendered buffers for oscillator presets
@@ -832,8 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function robustResume(){
     ensureCtx();
     if (!audioCtx) return false;
-    // Build samples for current preset using actual sampleRate (fast)
-    ensurePresetSamples();
+    ensurePresetSamples(); // build samples for current preset
     try { await audioCtx.resume(); } catch {}
     if (audioCtx.state !== 'running'){
       try {
@@ -846,12 +924,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return audioCtx.state === 'running';
   }
 
-  /* ---------- Fast-press helper to avoid click/touch double-fire ---------- */
+  /* ---------- Fast-press helper; also performs synchronous unlock ---------- */
   function addFastPress(el, handler){
     if (!el) return;
     let suppressClickUntil = 0;
     el.addEventListener('pointerdown', (e) => {
       if (e.button != null && e.button !== 0) return;
+      gestureUnlock(); // ensure unlocked before toggle on iOS
       suppressClickUntil = performance.now() + 350;
       handler(e);
     }, { passive:true });
@@ -859,6 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (performance.now() < suppressClickUntil) {
         e.preventDefault(); e.stopPropagation(); return;
       }
+      gestureUnlock(); // safety net
       handler(e);
     });
   }
@@ -1012,7 +1092,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* ---------------- Init ---------------- */
-  const defaults = { bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep' };
+  const defaults = {
+    bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
+    mainVol: 100, // Beat volume default now 100%
+    subVol : 70
+  };
+
   function applyDefaultsOnLoad(){
     setBpmUI(defaults.bpm);
     if (tsNum)     tsNum.value     = defaults.tsNum;
@@ -1020,6 +1105,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subdivSel) subdivSel.value = defaults.subdiv;   // quarters
     if (soundSel)  soundSel.value  = defaults.sound;
     if (bpmRange)  updateSliderFill(bpmRange);
+
+    // Volume sliders
+    if (mainVolRange){ mainVolRange.value = String(defaults.mainVol); updateMainVolFromUI(); }
+    if (subVolRange){  subVolRange.value  = String(defaults.subVol);  updateSubVolFromUI();  }
 
     beatStates = defaultBeatStates();
     renderLights();
@@ -1033,16 +1122,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
     if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
 
-    // Build samples early (for crisp first click); if AudioContext not ready yet,
-    // they'll be built on first start().
+    // Prebuild samples; if AudioContext not ready yet, they'll build on first Start.
     ensureCtx(); if (audioCtx) ensurePresetSamples();
 
     alignToGrid(true); // start at first; quarters have no sub audio
   }
+
   [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
   window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
 
-  setupAudioUnlock();
+  setupAudioUnlock(); // global unlock
   document.addEventListener('visibilitychange', ()=>{
     if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running'){
       try { audioCtx.resume(); } catch {}
