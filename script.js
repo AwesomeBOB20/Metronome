@@ -4,7 +4,8 @@
        + Beat/Sub volume sliders wired
        + Picker: click-outside-to-close, Esc to close, hide list on no matches
        + iOS first-tap audio unlock on Start
-       + Default Beat volume = 100% === */
+       + Default Beat volume = 100%
+       + Unified play toggle (pointerup) + instant mute on stop === */
 document.addEventListener('DOMContentLoaded', () => {
   const $  = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -308,10 +309,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function subsLightsCount(){
     const {a} = getSubdivParts();
     return Math.max(0, Math.floor(a));
-  }
-  function hasDenominator3(){
-    const {b} = getSubdivParts();
-    return b === 3;
   }
   function isQuartersSubdiv(){
     const {a,b} = getSubdivParts();
@@ -642,41 +639,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // One-time unlock on first gesture (global)
   function setupAudioUnlock(){
-  if (__audioUnlocked) return;
-  // Pointer-only to avoid iOS double-fire; keydown helps desktop
-  const events = ['pointerdown','keydown'];
-  const unlockOnce = () => {
-    gestureUnlock();
-    events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
-  };
-  events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
-}
+    if (__audioUnlocked) return;
+    // Pointer-only to avoid iOS double-fire; keydown helps desktop
+    const events = ['pointerdown','keydown'];
+    const unlockOnce = () => {
+      gestureUnlock();
+      events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
+    };
+    events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
+  }
 
-function gestureUnlock(){
-  if (__audioUnlocked) return;
-  ensureCtx();
-  if (!audioCtx) return;
+  function gestureUnlock(){
+    if (__audioUnlocked) return;
+    ensureCtx();
+    if (!audioCtx) return;
 
-  try { audioCtx.resume && audioCtx.resume(); } catch {}
+    try { audioCtx.resume && audioCtx.resume(); } catch {}
 
-  try {
-    // iOS: 1-sample silent buffer opens the route
-    const b = audioCtx.createBuffer(1, 1, 22050);
-    const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+    try {
+      // iOS: 1-sample silent buffer opens the route
+      const b = audioCtx.createBuffer(1, 1, 22050);
+      const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
 
-    // Android: prime with a zero-gain ConstantSource (some WebViews need this)
-    if (audioCtx.createConstantSource){
-      const cs = audioCtx.createConstantSource();
-      const g  = audioCtx.createGain(); g.gain.value = 0.0;
-      cs.connect(g).connect(master); cs.start();
-      setTimeout(()=>{ try{ cs.stop(); }catch{} }, 30);
-    }
-  } catch {}
+      // Android: prime with a zero-gain ConstantSource (some WebViews need this)
+      if (audioCtx.createConstantSource){
+        const cs = audioCtx.createConstantSource();
+        const g  = audioCtx.createGain(); g.gain.value = 0.0;
+        cs.connect(g).connect(master); cs.start();
+        setTimeout(()=>{ try{ cs.stop(); }catch{} }, 30);
+      }
+    } catch {}
 
-  ensurePresetSamples();
-  __audioUnlocked = true;
-}
-
+    ensurePresetSamples();
+    __audioUnlocked = true;
+  }
 
   const presets = {
     beep: {
@@ -936,106 +932,80 @@ function gestureUnlock(){
     return audioCtx.state === 'running';
   }
 
-  /* ---------- Fast-press helper; also performs synchronous unlock ---------- */
-  function addFastPress(el, handler){
-    if (!el) return;
-    let suppressClickUntil = 0;
-    el.addEventListener('pointerdown', (e) => {
-      if (e.button != null && e.button !== 0) return;
-      gestureUnlock(); // ensure unlocked before toggle on iOS
-      suppressClickUntil = performance.now() + 350;
-      handler(e);
-    }, { passive:true });
-    el.addEventListener('click', (e) => {
-      if (performance.now() < suppressClickUntil) {
-        e.preventDefault(); e.stopPropagation(); return;
-      }
-      gestureUnlock(); // safety net
-      handler(e);
-    });
-  }
-
+  /* ---------------- Transport ---------------- */
   async function start(){
     if (isRunning) return;
     const ok = await robustResume();
-    if (!ok) return;
-    if (getBpm() === 0){ return; }
+    if (!ok || getBpm() === 0) return;
+
+    // bring volume back up (we mute on stop)
+    if (audioCtx && master){
+      try{
+        master.gain.cancelScheduledValues(audioCtx.currentTime);
+        master.gain.setTargetAtTime(0.9, audioCtx.currentTime, 0.01);
+      }catch{}
+    }
+
     isRunning = true;
-    if (playBtn) { playBtn.textContent = 'Stop'; playBtn.setAttribute('aria-pressed','true'); }
+    if (playBtn){ playBtn.textContent = 'Stop'; playBtn.setAttribute('aria-pressed','true'); }
 
     alignToGrid(true);
-    schedule(); // schedule immediately
+    schedule();
     if (scheduleTimer) clearInterval(scheduleTimer);
     scheduleTimer = setInterval(schedule, lookaheadMs);
   }
+
   function stop(){
     if (!isRunning) return;
-    clearInterval(scheduleTimer); scheduleTimer=null; isRunning=false;
-    if (playBtn) { playBtn.textContent = 'Start'; playBtn.setAttribute('aria-pressed','false'); }
+    clearInterval(scheduleTimer); scheduleTimer = null; isRunning = false;
+
+    // hard mute to kill any scheduled ticks immediately (Android/WebView safety)
+    if (audioCtx && master){
+      try{
+        master.gain.cancelScheduledValues(audioCtx.currentTime);
+        master.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.005);
+      }catch{}
+    }
+
+    if (playBtn){ playBtn.textContent = 'Start'; playBtn.setAttribute('aria-pressed','false'); }
     alignToGrid(true);
   }
 
-  // Mobile first-tap start: unlock on pointerdown, toggle on pointerup (prevents 2-tap)
-  // ONE-HANDLER mobile-safe toggle (pointer-only to avoid iOS double fire)
-// Platform-aware Play toggle: Android = pointerdown, iOS = pointerup (single handler path)
-if (playBtn){
-  const IS_ANDROID = /Android/i.test(navigator.userAgent);
-  let lastToggleTs = 0;
-  const tooSoon = () => (performance.now() - lastToggleTs) < 260;
+  // Unified Play toggle: unlock on pointerdown, toggle on pointerup (pointer events only)
+  if (playBtn){
+    let lastToggleTs = 0;
+    const tooSoon = () => (performance.now() - lastToggleTs) < 260;
 
-  const toggle = async (e) => {
-    if (tooSoon()) { e.preventDefault(); e.stopPropagation(); return; }
-    lastToggleTs = performance.now();
-    e.preventDefault(); e.stopPropagation();
+    const toggle = async (e) => {
+      if (tooSoon()){ e.preventDefault(); e.stopPropagation(); return; }
+      lastToggleTs = performance.now();
+      e.preventDefault(); e.stopPropagation();
 
-    // Ensure audio is ready inside the same gesture
-    gestureUnlock();
-    await robustResume();
-
-    if (getBpm() === 0) return;
-    isRunning ? stop() : start();
-  };
-
-  if (window.PointerEvent){
-    // Always unlock on pointerdown
-    playBtn.addEventListener('pointerdown', () => {
       gestureUnlock();
-      ensurePresetSamples();
-    }, { passive:true });
+      await robustResume();
+      if (getBpm() === 0) return;
 
-    if (IS_ANDROID){
-      // Android: toggle immediately on pointerdown (first tap works)
-      playBtn.addEventListener('pointerdown', toggle, { passive:false });
+      isRunning ? stop() : await start();
+    };
 
-      // Eat the follow-up synthetic click so it can’t double-toggle
+    // unlock on down, toggle on up; no touchend binding (prevents iOS double fire)
+    if (window.PointerEvent){
+      playBtn.addEventListener('pointerdown', () => { gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+      playBtn.addEventListener('pointerup',   toggle, { passive:false });
+
+      // eat synthetic click
       playBtn.addEventListener('click', (e)=>{
-        if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
+        if (tooSoon()){ e.preventDefault(); e.stopPropagation(); }
       }, { capture:true });
     } else {
-      // iOS & others: toggle on pointerup to avoid double-fire
-      playBtn.addEventListener('pointerup', toggle, { passive:false });
-
-      // Eat the synthetic click
-      playBtn.addEventListener('click', (e)=>{
-        if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
-      }, { capture:true });
-    }
-  } else {
-    // Very old WebViews fallback
-    playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
-    if (IS_ANDROID){
-      playBtn.addEventListener('touchstart', toggle, { passive:false });
-    } else {
+      // very old WebViews fallback
+      playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
       playBtn.addEventListener('touchend',   toggle, { passive:false });
+      playBtn.addEventListener('click', (e)=>{
+        if (tooSoon()){ e.preventDefault(); e.stopPropagation(); }
+      }, { capture:true });
     }
-    playBtn.addEventListener('click', (e)=>{
-      if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
-    }, { capture:true });
   }
-}
-
-
-
 
   /* ---------------- Tap tempo ---------------- */
   const TAP_RESET_MS = 1500;
