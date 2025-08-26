@@ -643,24 +643,32 @@ document.addEventListener('DOMContentLoaded', () => {
   // One-time unlock on first gesture (global)
   function setupAudioUnlock(){
     if (__audioUnlocked) return;
-    const events = ['pointerdown','touchend','mousedown','keydown','click'];
+    const events = ['pointerdown','touchstart','pointerup','touchend','mousedown','keydown','click'];
     const unlockOnce = () => {
       gestureUnlock();
-      events.forEach(ev=>document.removeEventListener(ev, unlockOnce, true));
+      events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
     };
-    events.forEach(ev=>document.addEventListener(ev, unlockOnce, true));
+    events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
   }
 
-  // Synchronous unlock used by Start button too
   function gestureUnlock(){
     if (__audioUnlocked) return;
     ensureCtx();
     if (!audioCtx) return;
     try { audioCtx.resume && audioCtx.resume(); } catch {}
+
     try {
-      // tiny silent tick helps Safari register audio output path
+      // iOS: 1-sample silent buffer opens the route
       const b = audioCtx.createBuffer(1, 1, 22050);
       const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+
+      // Android extra: short ConstantSource at 0 gain to fully prime output
+      if (audioCtx.createConstantSource){
+        const cs = audioCtx.createConstantSource();
+        const g  = audioCtx.createGain(); g.gain.value = 0.0;
+        cs.connect(g).connect(master); cs.start();
+        setTimeout(()=>{ try{ cs.stop(); }catch{} }, 20);
+      }
     } catch {}
     ensurePresetSamples();
     __audioUnlocked = true;
@@ -963,10 +971,25 @@ document.addEventListener('DOMContentLoaded', () => {
     alignToGrid(true);
   }
 
-  // Use fast-press for the Start button (prevents iOS two-tap behavior)
+  // Mobile first-tap start: unlock on pointerdown, toggle on pointerup (prevents 2-tap)
   if (playBtn){
-    addFastPress(playBtn, (e)=>{ e.preventDefault?.(); e.stopPropagation?.(); isRunning ? stop() : start(); });
+    // ensure audio is unlocked before we try to start
+    playBtn.addEventListener('pointerdown', () => { gestureUnlock(); }, { passive:true });
+    playBtn.addEventListener('touchstart',  () => { gestureUnlock(); }, { passive:true });
+
+    // toggle on pointerup/touchend so resume() is still within the gesture
+    const onUp = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (!__audioUnlocked) gestureUnlock();
+      isRunning ? stop() : await start();
+    };
+    playBtn.addEventListener('pointerup', onUp, { passive:false });
+    playBtn.addEventListener('touchend',  onUp, { passive:false });
+
+    // prevent the synthetic click from double-toggling
+    playBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); }, { capture:true });
   }
+
 
   /* ---------------- Tap tempo ---------------- */
   const TAP_RESET_MS = 1500;
