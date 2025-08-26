@@ -977,7 +977,9 @@ function gestureUnlock(){
 
   // Mobile first-tap start: unlock on pointerdown, toggle on pointerup (prevents 2-tap)
   // ONE-HANDLER mobile-safe toggle (pointer-only to avoid iOS double fire)
+// Platform-aware Play toggle: Android = pointerdown, iOS = pointerup (single handler path)
 if (playBtn){
+  const IS_ANDROID = /Android/i.test(navigator.userAgent);
   let lastToggleTs = 0;
   const tooSoon = () => (performance.now() - lastToggleTs) < 260;
 
@@ -986,7 +988,7 @@ if (playBtn){
     lastToggleTs = performance.now();
     e.preventDefault(); e.stopPropagation();
 
-    // Make sure audio is unlocked and running inside the same gesture
+    // Ensure audio is ready inside the same gesture
     gestureUnlock();
     await robustResume();
 
@@ -995,21 +997,43 @@ if (playBtn){
   };
 
   if (window.PointerEvent){
-    // Use pointer events ONLY (don’t also bind touchend on iOS)
-    playBtn.addEventListener('pointerdown', () => { gestureUnlock(); ensurePresetSamples(); }, { passive:true });
-    playBtn.addEventListener('pointerup',   toggle, { passive:false });
+    // Always unlock on pointerdown
+    playBtn.addEventListener('pointerdown', () => {
+      gestureUnlock();
+      ensurePresetSamples();
+    }, { passive:true });
 
-    // Eat the follow-up synthetic click so it can’t double-toggle
+    if (IS_ANDROID){
+      // Android: toggle immediately on pointerdown (first tap works)
+      playBtn.addEventListener('pointerdown', toggle, { passive:false });
+
+      // Eat the follow-up synthetic click so it can’t double-toggle
+      playBtn.addEventListener('click', (e)=>{
+        if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
+      }, { capture:true });
+    } else {
+      // iOS & others: toggle on pointerup to avoid double-fire
+      playBtn.addEventListener('pointerup', toggle, { passive:false });
+
+      // Eat the synthetic click
+      playBtn.addEventListener('click', (e)=>{
+        if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
+      }, { capture:true });
+    }
+  } else {
+    // Very old WebViews fallback
+    playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+    if (IS_ANDROID){
+      playBtn.addEventListener('touchstart', toggle, { passive:false });
+    } else {
+      playBtn.addEventListener('touchend',   toggle, { passive:false });
+    }
     playBtn.addEventListener('click', (e)=>{
       if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
     }, { capture:true });
-  } else {
-    // Fallback for very old Android WebViews
-    playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
-    playBtn.addEventListener('touchend',   toggle, { passive:false });
-    playBtn.addEventListener('click',      toggle, { passive:false });
   }
 }
+
 
 
 
