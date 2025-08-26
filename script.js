@@ -642,37 +642,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // One-time unlock on first gesture (global)
   function setupAudioUnlock(){
-    if (__audioUnlocked) return;
-    const events = ['pointerdown','touchstart','pointerup','touchend','mousedown','keydown','click'];
-    const unlockOnce = () => {
-      gestureUnlock();
-      events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
-    };
-    events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
-  }
+  if (__audioUnlocked) return;
+  // Pointer-only to avoid iOS double-fire; keydown helps desktop
+  const events = ['pointerdown','keydown'];
+  const unlockOnce = () => {
+    gestureUnlock();
+    events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
+  };
+  events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
+}
 
-  function gestureUnlock(){
-    if (__audioUnlocked) return;
-    ensureCtx();
-    if (!audioCtx) return;
-    try { audioCtx.resume && audioCtx.resume(); } catch {}
+function gestureUnlock(){
+  if (__audioUnlocked) return;
+  ensureCtx();
+  if (!audioCtx) return;
 
-    try {
-      // iOS: 1-sample silent buffer opens the route
-      const b = audioCtx.createBuffer(1, 1, 22050);
-      const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+  try { audioCtx.resume && audioCtx.resume(); } catch {}
 
-      // Android extra: short ConstantSource at 0 gain to fully prime output
-      if (audioCtx.createConstantSource){
-        const cs = audioCtx.createConstantSource();
-        const g  = audioCtx.createGain(); g.gain.value = 0.0;
-        cs.connect(g).connect(master); cs.start();
-        setTimeout(()=>{ try{ cs.stop(); }catch{} }, 20);
-      }
-    } catch {}
-    ensurePresetSamples();
-    __audioUnlocked = true;
-  }
+  try {
+    // iOS: 1-sample silent buffer opens the route
+    const b = audioCtx.createBuffer(1, 1, 22050);
+    const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+
+    // Android: prime with a zero-gain ConstantSource (some WebViews need this)
+    if (audioCtx.createConstantSource){
+      const cs = audioCtx.createConstantSource();
+      const g  = audioCtx.createGain(); g.gain.value = 0.0;
+      cs.connect(g).connect(master); cs.start();
+      setTimeout(()=>{ try{ cs.stop(); }catch{} }, 30);
+    }
+  } catch {}
+
+  ensurePresetSamples();
+  __audioUnlocked = true;
+}
+
 
   const presets = {
     beep: {
@@ -972,23 +976,41 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Mobile first-tap start: unlock on pointerdown, toggle on pointerup (prevents 2-tap)
-  if (playBtn){
-    // ensure audio is unlocked before we try to start
-    playBtn.addEventListener('pointerdown', () => { gestureUnlock(); }, { passive:true });
-    playBtn.addEventListener('touchstart',  () => { gestureUnlock(); }, { passive:true });
+  // ONE-HANDLER mobile-safe toggle (pointer-only to avoid iOS double fire)
+if (playBtn){
+  let lastToggleTs = 0;
+  const tooSoon = () => (performance.now() - lastToggleTs) < 260;
 
-    // toggle on pointerup/touchend so resume() is still within the gesture
-    const onUp = async (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (!__audioUnlocked) gestureUnlock();
-      isRunning ? stop() : await start();
-    };
-    playBtn.addEventListener('pointerup', onUp, { passive:false });
-    playBtn.addEventListener('touchend',  onUp, { passive:false });
+  const toggle = async (e) => {
+    if (tooSoon()) { e.preventDefault(); e.stopPropagation(); return; }
+    lastToggleTs = performance.now();
+    e.preventDefault(); e.stopPropagation();
 
-    // prevent the synthetic click from double-toggling
-    playBtn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); }, { capture:true });
+    // Make sure audio is unlocked and running inside the same gesture
+    gestureUnlock();
+    await robustResume();
+
+    if (getBpm() === 0) return;
+    isRunning ? stop() : start();
+  };
+
+  if (window.PointerEvent){
+    // Use pointer events ONLY (don’t also bind touchend on iOS)
+    playBtn.addEventListener('pointerdown', () => { gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+    playBtn.addEventListener('pointerup',   toggle, { passive:false });
+
+    // Eat the follow-up synthetic click so it can’t double-toggle
+    playBtn.addEventListener('click', (e)=>{
+      if (tooSoon()) { e.preventDefault(); e.stopPropagation(); }
+    }, { capture:true });
+  } else {
+    // Fallback for very old Android WebViews
+    playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+    playBtn.addEventListener('touchend',   toggle, { passive:false });
+    playBtn.addEventListener('click',      toggle, { passive:false });
   }
+}
+
 
 
   /* ---------------- Tap tempo ---------------- */
