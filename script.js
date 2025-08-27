@@ -5,7 +5,8 @@
        + Picker: click-outside-to-close, Esc to close, hide list on no matches
        + iOS first-tap audio unlock on Start
        + Default Beat volume = 100%
-       + Unified play toggle (pointerup) + instant mute on stop === */
+       + Unified play toggle (pointerup) + instant mute on stop
+       + HOT output chain (drive + EQ + soft clip + makeup) for loudness === */
 document.addEventListener('DOMContentLoaded', () => {
   const $  = (s,root=document)=>root.querySelector(s);
   const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
@@ -574,6 +575,30 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ---------------- Audio ---------------- */
   let audioCtx=null, master=null, __audioUnlocked=false;
 
+  // === LOUDNESS KNOBS (tweak these) ===
+  const HOT_MODE     = true;   // leave true for louder output
+  const DRIVE_DB     = 8;     // pre-clip drive (≈4x). Try 14–18 for more
+  const PRESENCE_DB  = 4;      // peaking EQ boost around 2.6 kHz
+  const HPF_HZ       = 110;    // high-pass to save headroom
+  const CLIP_K       = 2.4;    // soft-clip strength (tanh curve)
+  const MAKEUP_DB    = 0;      // post-clip makeup gain (≈2x)
+
+  // Utility
+  const dbToGain = db => Math.pow(10, db/20);
+
+  // Hot chain nodes
+  let hotPre=null, presence=null, hpf=null, clipper=null, hotPost=null;
+
+  function makeSoftClipCurve(k=3.5, n=65536){
+    const curve = new Float32Array(n);
+    for (let i=0;i<n;i++){
+      const x = (i/(n-1))*2 - 1; // -1..1
+      // soft clip using tanh, normalized
+      curve[i] = Math.tanh(k*x) / Math.tanh(k);
+    }
+    return curve;
+  }
+
   function ensureCtx(){
     if (!audioCtx){
       try {
@@ -581,9 +606,43 @@ document.addEventListener('DOMContentLoaded', () => {
         audioCtx = new Ctx({ latencyHint: 'interactive' });
       } catch (_) { return; }
 
+      // Main mix bus
       master = audioCtx.createGain();
-      master.gain.setValueAtTime(0.9, audioCtx.currentTime);
-      master.connect(audioCtx.destination);
+      master.gain.setValueAtTime(1.0, audioCtx.currentTime);
+
+      if (HOT_MODE){
+        hotPre   = audioCtx.createGain();
+        presence = audioCtx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2600;
+        presence.Q.value = 0.9;
+        presence.gain.value = PRESENCE_DB;
+
+        hpf = audioCtx.createBiquadFilter();
+        hpf.type = 'highpass';
+        hpf.frequency.value = HPF_HZ;
+        hpf.Q.value = 0.707;
+
+        clipper = audioCtx.createWaveShaper();
+        clipper.curve = makeSoftClipCurve(CLIP_K);
+        clipper.oversample = '4x';
+
+        hotPost = audioCtx.createGain();
+
+        // Gains
+        hotPre.gain.value  = dbToGain(DRIVE_DB);
+        hotPost.gain.value = dbToGain(MAKEUP_DB);
+
+        // Chain: master → pre → presence → HPF → clip → post → dest
+        master.connect(hotPre);
+        hotPre.connect(presence);
+        presence.connect(hpf);
+        hpf.connect(clipper);
+        clipper.connect(hotPost);
+        hotPost.connect(audioCtx.destination);
+      } else {
+        master.connect(audioCtx.destination);
+      }
     }
   }
 
@@ -610,7 +669,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         default:         x = Math.sin(phase);
       }
-      // simple fast-attack exponential decay envelope
+      // fast-attack exponential decay envelope
       const env = i < attack ? (i/attack) : Math.exp(-t / tConst);
       data[i] = x * env;
     }
@@ -632,7 +691,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ['accent','beat','sub','subAccent'].forEach(k=>{
       const spec = p[k] || p.beat;
       const [freq, shape, dur] = spec;
-      out[k] = renderWaveSample(freq, shape || 'sine', dur, sr);
+      // slightly longer to increase energy
+      const durBoost = (k==='accent'||k==='beat') ? 1.15 : 1.1;
+      out[k] = renderWaveSample(freq, shape || 'sine', dur*durBoost, sr);
     });
     sampleCache[chosen] = out;
   }
@@ -640,7 +701,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // One-time unlock on first gesture (global)
   function setupAudioUnlock(){
     if (__audioUnlocked) return;
-    // Pointer-only to avoid iOS double-fire; keydown helps desktop
     const events = ['pointerdown','keydown'];
     const unlockOnce = () => {
       gestureUnlock();
@@ -700,15 +760,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const kindScale   = k => k==='accent'?1.0 : k==='beat'?0.8 : 0.6;
 
   // === Volume state (Beat/Sub) ===
-  let mainVol = 1.00; // 0.0–1.5 after mapping; affects 'accent' & 'beat'
-  let subVol  = 0.80; // affects 'sub' & 'subAccent'
+let mainVol = 1.00; // affects accent/beat
+let subVol  = 0.80; // affects sub/subAccent
 
-  function sliderToLinear(v){
-    const t = Math.max(0, Math.min(100, Number(v)||0)) / 100;
-    // gentle loudness curve (more resolution at lower values)
-    return 1.5 * Math.pow(t, 0.7);
-  }
-  function updateMainVolFromUI(){
+// Map 0–100% to -60 dB … 0 dB (log curve). 1% is nearly inaudible.
+function sliderToLinear(v){
+  const tRaw = Number(v);
+  const t = Math.max(0, Math.min(100, isFinite(tRaw) ? tRaw : 0)) / 100;
+  if (t <= 0) return 0;
+  const MIN_DB = -60;                 // make this -70 or -80 for an even slower rise
+  const db = MIN_DB + (0 - MIN_DB) * t;
+  return Math.pow(10, db / 20);       // 10^(dB/20)
+}
+function updateMainVolFromUI(){
     if (!mainVolRange) return;
     mainVol = sliderToLinear(mainVolRange.value);
     if (mainVolValue) mainVolValue.textContent = `${Math.round(Number(mainVolRange.value)||0)}%`;
@@ -749,7 +813,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Procedural for wood/clave (kept as-is)
+    // Procedural for wood/clave
     if (freq === 'wood' || freq === 'wood-hi'){
       const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
       const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
@@ -830,7 +894,6 @@ document.addEventListener('DOMContentLoaded', () => {
       currentBeatInBar = 0;
 
       nextBeatTime = gridT0;
-      // Disable independent sub scheduling for quarters
       if (ratio > EPS && !isQuartersSubdiv()){
         nextSubTime = gridT0;
       } else {
@@ -890,7 +953,31 @@ document.addEventListener('DOMContentLoaded', () => {
       const tNext = Math.min(nextBeatTime, nextSubTime);
       if (tNext >= horizon) break;
 
-      if (nextBeatTime <= nextSubTime + EPS){
+const coincide = subEnabled && Math.abs(nextBeatTime - nextSubTime) <= EPS;
+
+if (coincide){
+  const state = beatStates[currentBeatInBar] ?? 1;
+  if (state !== 0){
+    trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+    pulseLight(currentBeatInBar);
+  }
+  const lights = $$('.sub-light', subLightsWrap);
+  if (lights.length){
+    const visIdx = ((subCounter % lights.length) + lights.length) % lights.length;
+    const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+    if (s !== 0){
+      trigger(nextBeatTime, s === 2 ? 'subAccent' : 'sub', 0.45); // add sub on downbeat
+      pulseSubLightAt(visIdx);
+    }
+  }
+  beatCounter++;
+  currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+  subCounter++;
+  continue;
+}
+
+
+      if (nextBeatTime < nextSubTime){
         const state = beatStates[currentBeatInBar] ?? 1;
         if (state !== 0){
           trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
@@ -901,6 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         continue;
       }
 
+      // Subdivision fires
       if (subEnabled){
         const lights = $$('.sub-light', subLightsWrap);
         const visibleCount = lights.length || 1;
@@ -919,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function robustResume(){
     ensureCtx();
     if (!audioCtx) return false;
-    ensurePresetSamples(); // build samples for current preset
+    ensurePresetSamples();
     try { await audioCtx.resume(); } catch {}
     if (audioCtx.state !== 'running'){
       try {
@@ -938,11 +1026,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const ok = await robustResume();
     if (!ok || getBpm() === 0) return;
 
-    // bring volume back up (we mute on stop)
+    // bring volume back up
     if (audioCtx && master){
       try{
         master.gain.cancelScheduledValues(audioCtx.currentTime);
-        master.gain.setTargetAtTime(0.9, audioCtx.currentTime, 0.01);
+        master.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.01);
       }catch{}
     }
 
@@ -959,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isRunning) return;
     clearInterval(scheduleTimer); scheduleTimer = null; isRunning = false;
 
-    // hard mute to kill any scheduled ticks immediately (Android/WebView safety)
+    // instant mute to kill tails
     if (audioCtx && master){
       try{
         master.gain.cancelScheduledValues(audioCtx.currentTime);
@@ -971,7 +1059,7 @@ document.addEventListener('DOMContentLoaded', () => {
     alignToGrid(true);
   }
 
-  // Unified Play toggle: unlock on pointerdown, toggle on pointerup (pointer events only)
+  // Unified Play toggle
   if (playBtn){
     let lastToggleTs = 0;
     const tooSoon = () => (performance.now() - lastToggleTs) < 260;
@@ -988,17 +1076,13 @@ document.addEventListener('DOMContentLoaded', () => {
       isRunning ? stop() : await start();
     };
 
-    // unlock on down, toggle on up; no touchend binding (prevents iOS double fire)
     if (window.PointerEvent){
       playBtn.addEventListener('pointerdown', () => { gestureUnlock(); ensurePresetSamples(); }, { passive:true });
       playBtn.addEventListener('pointerup',   toggle, { passive:false });
-
-      // eat synthetic click
       playBtn.addEventListener('click', (e)=>{
         if (tooSoon()){ e.preventDefault(); e.stopPropagation(); }
       }, { capture:true });
     } else {
-      // very old WebViews fallback
       playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
       playBtn.addEventListener('touchend',   toggle, { passive:false });
       playBtn.addEventListener('click', (e)=>{
@@ -1059,11 +1143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isRunning) alignToGrid(false);
   });
 
-  /* ---------------- Numerator auto-set rule ----------------
-     If subdivision's denominator == 3 → numerator = '3'
-     Else if denominator == 2 → numerator = '4'
-     Else → leave numerator unchanged
-  ---------------------------------------------------------- */
+  /* ---------------- Numerator auto-set rule ---------------- */
   function autoSetNumeratorBySubdivision(){
     const { b } = getSubdivParts();
     let targetNum = null;
@@ -1161,7 +1241,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
     if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
 
-    // Prebuild samples; if AudioContext not ready yet, they'll build on first Start.
     ensureCtx(); if (audioCtx) ensurePresetSamples();
 
     alignToGrid(true); // start at first; quarters have no sub audio
