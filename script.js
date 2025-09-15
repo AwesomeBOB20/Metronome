@@ -569,7 +569,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rangeEl.style.setProperty('--bg-pos', pct+'% 100%');
     // Use color by class; default purple, orange for .slider--orange
     const color = rangeEl.classList.contains('slider--orange') ? 'var(--orange)' : 'var(--purple)';
-    rangeEl.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, var(--gray-1) ${pct}%, var(--gray-1) 100%)`;
+    rangeEl.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, var(--white) ${pct}%, var(--white) 100%)`;
   }
 
   /* ---------------- Audio ---------------- */
