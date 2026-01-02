@@ -31,11 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const tsNum     = $('#metroTSNum');
   const tsDen     = $('#metroTSDen');
   const subdivSel = $('#metroSubdivision');
+  const subMultSel= $('#subMultSel');      // <--- ADDED
   const soundSel  = $('#metroSound');
 
   const tsNumTrigger  = $('#tsNumTrigger');
   const tsDenTrigger  = $('#tsDenTrigger');
   const subdivTrigger = $('#subdivTrigger');
+  const subMultTrigger= $('#subMultTrigger'); // <--- ADDED
   const soundTrigger  = $('#soundTrigger');
 
   const lightsWrap    = $('#metroLights'); // main lights
@@ -87,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('click',       rm);
   }
   [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn,
-   tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(wirePressedVisual);
+   tsNumTrigger, tsDenTrigger, subdivTrigger, subMultTrigger, soundTrigger].forEach(wirePressedVisual);
 
   // Enable :active-like behavior on iOS
   document.addEventListener('touchstart', function(){}, { passive:true });
@@ -267,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+  [tsNumTrigger, tsDenTrigger, subdivTrigger, subMultTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
   // Click-outside-to-close (robust) + Esc
   const PANEL_SELECTOR = '.picker__panel, .picker-panel, .picker, [role="dialog"], [data-panel], [data-modal-panel]';
   function getPickerPanel(){
@@ -293,14 +295,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getSubdivParts(){
     const raw = (subdivSel?.value ?? '1/1').trim().replace(/\s+/g,'');
+    
+    // Just parse the base value (Multiplier is IGNORED for speed ratio)
+    let a = 1, b = 1;
     if (raw.includes('/')){
       const [aStr,bStr] = raw.split('/');
-      const a = Number(aStr), b = Number(bStr);
-      return { a: (isFinite(a)?a:0), b: (isFinite(b)?b:1), raw };
+      a = Number(aStr);
+      b = Number(bStr);
+    } else {
+      a = Number(raw);
     }
-    const n = Number(raw);
-    return { a: (isFinite(n)?n:1), b: 1, raw };
+    return { a: (isFinite(a)?a:1), b: (isFinite(b)?b:1), raw };
   }
+
   function getSubdivRatio(){
     const {a,b} = getSubdivParts();
     if (b <= 0) return 0;
@@ -308,9 +315,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return r >= 0 ? r : 0;
   }
   function subsLightsCount(){
-    const {a} = getSubdivParts();
-    return Math.max(0, Math.floor(a));
+    const { a } = getSubdivParts();
+    // Apply multiplier HERE to get total number of steps in the pattern
+    const mult = parseInt(subMultSel?.value || '1', 10);
+    return Math.max(0, Math.floor(a) * mult);
   }
+
   function isQuartersSubdiv(){
     const {a,b} = getSubdivParts();
     return a === 1 && b === 1; // 1/1
@@ -332,12 +342,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const beats = clampInt(tsNum.value,1,12);
     if (!beatStates.length || beatStates.length !== beats) beatStates = defaultBeatStates();
 
-    // Measure container and decide single-row vs two-row
+    // Use 1fr instead of calculated pixels so it fills width automatically
     const cw = lightsWrap.clientWidth || lightsWrap.getBoundingClientRect().width || 0;
     const style = getComputedStyle(lightsWrap);
     const gap = parseFloat(style.gap || '20') || 20;
-    const MIN_CELL = 28; // px
+    const MIN_CELL = 28; 
 
+    // Calculate how many beats fit per row
     const fitsSingleRow = (count)=> {
       if (count <= 0) return true;
       const totalGaps = gap * Math.max(0, count-1);
@@ -350,10 +361,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fitsSingleRow(n)){
       const row = document.createElement('div');
       row.className = 'main-row';
-      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
-      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
-      row.style.width = 'max-content';
-      row.style.marginInline = 'auto';
+      
+      // FIX: Use 1fr and 100% width
+      row.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+      row.style.width = '100%';
+      // ----------------------------
 
       for (let i=0;i<n;i++){
         const d = document.createElement('div');
@@ -375,20 +387,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
       if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
 
-      const maxCount = Math.max(topCount, bottomCount);
-      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
-
       const rowTop = document.createElement('div');
       rowTop.className = 'main-row';
-      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
-      rowTop.style.width = 'max-content';
-      rowTop.style.marginInline = 'auto';
+      rowTop.style.gridTemplateColumns = `repeat(${topCount}, 1fr)`; // FIX
+      rowTop.style.width = '100%'; // FIX
 
       const rowBottom = document.createElement('div');
       rowBottom.className = 'main-row';
-      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
-      rowBottom.style.width = 'max-content';
-      rowBottom.style.marginInline = 'auto';
+      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, 1fr)`; // FIX
+      rowBottom.style.width = '100%'; // FIX
 
       for (let i=0;i<n;i++){
         const d = document.createElement('div');
@@ -429,8 +436,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const n = subsLightsCount();
-    if (n <= 0){
+    const totalLights = subsLightsCount(); // Now returns (Base * Mult)
+    if (totalLights <= 0){
       subLightsWrap.hidden = true;
       subLightsWrap.innerHTML = '';
       subStates = [];
@@ -438,82 +445,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     subLightsWrap.hidden = false;
 
-    if (!subStates.length || subStates.length !== n) subStates = defaultSubStates(n);
-
-    const cw = subLightsWrap.clientWidth || subLightsWrap.getBoundingClientRect().width || 0;
-    const style = getComputedStyle(subLightsWrap);
-    const gap = parseFloat(style.gap || '20') || 20;
-    const MIN_CELL = 28;
-
-    const fitsSingleRow = (count)=> {
-      if (count <= 0) return true;
-      const totalGaps = gap * Math.max(0, count-1);
-      const cellW = (cw - totalGaps) / count;
-      return cellW >= MIN_CELL;
-    };
+    // Initialize states if count changed
+    if (!subStates.length || subStates.length !== totalLights) subStates = defaultSubStates(totalLights);
 
     subLightsWrap.innerHTML = '';
 
-    if (fitsSingleRow(n)){
-      const row = document.createElement('div');
-      row.className = 'sub-row';
-      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
-      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
-      row.style.width = 'max-content';
-      row.style.marginInline = 'auto';
+    // Calculate grouping
+    const mult = parseInt(subMultSel?.value || '1', 10);
+    const lightsPerGroup = totalLights / mult;
 
-      for (let i=0;i<n;i++){
+    // Create the container Row (Grid with 'mult' columns)
+    const row = document.createElement('div');
+    row.className = 'sub-row-generated';
+    row.style.display = 'grid';
+    row.style.gridTemplateColumns = `repeat(${mult}, 1fr)`; 
+    row.style.gap = '20px'; // Matches main Metro Lights gap
+    row.style.width = '100%';
+
+    let globalIdx = 0;
+
+    for (let g = 0; g < mult; g++) {
+      // Create the Group (cluster)
+      const group = document.createElement('div');
+      group.className = 'sub-group';
+      group.style.display = 'grid';
+      group.style.gridTemplateColumns = `repeat(${lightsPerGroup}, 1fr)`;
+      group.style.gap = '10px'; // Tight spacing inside group
+      
+      for (let i = 0; i < lightsPerGroup; i++) {
+        const idx = globalIdx++;
         const d = document.createElement('div');
         d.className = 'sub-light';
-        applySubClass(d, subStates[i]);
-        d.title = 'Click: Normal → Accent → None';
-        d.addEventListener('click', ()=>{
-          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
-          applySubClass(d, subStates[i]);
+        applySubClass(d, subStates[idx]);
+        d.addEventListener('click', () => {
+          subStates[idx] = (subStates[idx] === 1) ? 2 : (subStates[idx] === 2 ? 0 : 1);
+          applySubClass(d, subStates[idx]);
         });
-        row.appendChild(d);
+        group.appendChild(d);
       }
-      subLightsWrap.appendChild(row);
-
-    } else {
-      let topCount    = Math.ceil(n/2);
-      let bottomCount = n - topCount;
-
-      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
-      if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
-      if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
-
-      const maxCount = Math.max(topCount, bottomCount);
-      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
-
-      const rowTop = document.createElement('div');
-      rowTop.className = 'sub-row';
-      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
-      rowTop.style.width = 'max-content';
-      rowTop.style.marginInline = 'auto';
-
-      const rowBottom = document.createElement('div');
-      rowBottom.className = 'sub-row';
-      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
-      rowBottom.style.width = 'max-content';
-      rowBottom.style.marginInline = 'auto';
-
-      for (let i=0;i<n;i++){
-        const d = document.createElement('div');
-        d.className = 'sub-light';
-        applySubClass(d, subStates[i]);
-        d.title = 'Click: Normal → Accent → None';
-        d.addEventListener('click', ()=>{
-          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
-          applySubClass(d, subStates[i]);
-        });
-        (i < topCount ? rowTop : rowBottom).appendChild(d);
-      }
-
-      subLightsWrap.appendChild(rowTop);
-      subLightsWrap.appendChild(rowBottom);
+      row.appendChild(group);
     }
+
+    subLightsWrap.appendChild(row);
   }
+
 
   function applySubClass(el, state){
     el.classList.remove('is-on','is-accent','is-muted','is-hit');
@@ -1110,20 +1085,36 @@ if (coincide){
   }
   tapBtn && tapBtn.addEventListener('click', onTap);
 
-  /* ---------------- UI sync ---------------- */
+  /* ---------------- UI sync (Smooth Tempo Change) ---------------- */
   function setBpmUI(val){
     const v = clampInt(val,0,400);
-    if (bpmRange)   bpmRange.value   = String(v);
-    if (bpmInput)   bpmInput.value   = String(v);
+    // Check activeElement to avoid cursor jumping while typing
+    if (bpmRange && document.activeElement !== bpmRange) bpmRange.value = String(v);
+    if (bpmInput && document.activeElement !== bpmInput) bpmInput.value = String(v);
     if (bpmDisplay) bpmDisplay.textContent = String(v);
-    if (bpmRange)   updateSliderFill(bpmRange);
+    if (bpmRange) updateSliderFill(bpmRange);
   }
-  function stepBpm(delta){
-    setBpmUI(getBpm() + delta);
-    if (isRunning){
-      if (getBpm()===0) { stop(); return; }
-      alignToGrid(false);
+
+  // Pivots the timeline around the NEXT beat so timing doesn't jump
+  function smoothTempoUpdate(){
+    if (!isRunning) return;
+    if (getBpm() === 0) { stop(); return; }
+    
+    const spb = secondsPerBeat();
+    // Formula: NewStart = TargetTime - (BeatsElapsed * NewSecondsPerBeat)
+    // This ensures the very next beat hits exactly when it was originally scheduled.
+    if (isFinite(spb) && nextBeatTime > 0) {
+      gridT0 = nextBeatTime - (beatCounter * spb);
     }
+  }
+
+  function stepBpm(delta){
+    const newVal = getBpm() + delta;
+    setBpmUI(newVal);
+    // Manually force slider update for button clicks
+    if (bpmRange) bpmRange.value = String(newVal);
+    
+    if (isRunning) smoothTempoUpdate();
   }
 
   bpmDec1Btn && bpmDec1Btn.addEventListener('click', ()=>stepBpm(-1));
@@ -1131,17 +1122,30 @@ if (coincide){
   bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
   bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
 
-  bpmRange && bpmRange.addEventListener('input', e=>{
-    setBpmUI(e.target.value);
-    if (isRunning){
-      if (getBpm()===0) { stop(); return; }
-      alignToGrid(false);
-    }
-  });
-  bpmInput && bpmInput.addEventListener('input', e=>{
-    setBpmUI(e.target.value||0);
-    if (isRunning) alignToGrid(false);
-  });
+  if (bpmRange) {
+    bpmRange.addEventListener('input', e => {
+      // 1. Update text/display immediately
+      const v = clampInt(e.target.value, 0, 400);
+      if (bpmDisplay) bpmDisplay.textContent = String(v);
+      if (bpmInput) bpmInput.value = String(v);
+      updateSliderFill(bpmRange);
+
+      // 2. Smoothly update engine without resetting grid
+      if (isRunning) smoothTempoUpdate();
+    });
+  }
+
+  if (bpmInput) {
+    bpmInput.addEventListener('input', e => {
+      const v = clampInt(e.target.value, 0, 400);
+      if (bpmDisplay) bpmDisplay.textContent = String(v);
+      if (bpmRange) {
+        bpmRange.value = String(v);
+        updateSliderFill(bpmRange);
+      }
+      if (isRunning) smoothTempoUpdate();
+    });
+  }
 
   /* ---------------- Numerator auto-set rule ---------------- */
   function autoSetNumeratorBySubdivision(){
@@ -1156,13 +1160,21 @@ if (coincide){
   }
 
   // Setting changes
-  [tsNum, tsDen, subdivSel].forEach(el=> el && el.addEventListener('change', ()=>{
+  // Added subMultSel to this list so it triggers updates
+  [tsNum, tsDen, subdivSel, subMultSel].forEach(el=> el && el.addEventListener('change', ()=>{
+    
     if (el === subdivSel){
       if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
       autoSetNumeratorBySubdivision();
-    } else if (el === tsNum){
+    } 
+    else if (el === subMultSel){
+      // Update the multiplier trigger text
+      if (subMultTrigger) subMultTrigger.value = subMultSel.options[subMultSel.selectedIndex]?.text || '';
+    } 
+    else if (el === tsNum){
       if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
-    } else if (el === tsDen){
+    } 
+    else if (el === tsDen){
       if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
     }
 
@@ -1214,7 +1226,7 @@ if (coincide){
   const defaults = {
     bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
     mainVol: 100, // Beat volume default now 100%
-    subVol : 70
+    subVol : 85
   };
 
   function applyDefaultsOnLoad(){
