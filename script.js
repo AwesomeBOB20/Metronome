@@ -1226,7 +1226,7 @@ if (coincide){
   const defaults = {
     bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
     mainVol: 100, // Beat volume default now 100%
-    subVol : 85
+    subVol : 80
   };
 
   function applyDefaultsOnLoad(){
@@ -1270,3 +1270,4 @@ if (coincide){
 
   applyDefaultsOnLoad();
 });
+
