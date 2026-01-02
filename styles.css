@@ -1,366 +1,496 @@
 @import url('https://fonts.googleapis.com/css2?family=Ubuntu:wght@400&display=swap');
 
 /* === Theme === */
-:root{
-  --black:#000; --white:#fff;
-  --bg:#1c1c1c;
+:root {
+  --black: #000;
+  --white: #fff;
+  --bg: #1c1c1c;
 
   /* Oranges */
-  --orange:#d35400;
-  --orange-d:#c25227;   /* hover */
-  --orange-dim:#a84300;
+  --orange: #d35400;
+  --orange-d: #c25227;   /* hover */
+  --orange-dim: #a84300;
 
   /* Purple & Blues */
-  --purple:#96318d; --purple-d:#81227a; --purple-dim:#752070;
-  --blue:#058890;  --blue-d:#04767e;   --blue-dim:#03656b; /* NONE color */
+  --purple: #96318d; 
+  --purple-d: #81227a; 
+  --purple-dim: #752070;
+  --blue: #058890;  
+  --blue-d: #04767e;   
+  --blue-dim: #03656b; 
 
-  --gray-1:#ddd; --gray-3:#53525d;
+  --gray-1: #ddd; 
+  --gray-3: #53525d;
 }
 
 /* === Base === */
-*{ box-sizing:border-box; }
-html, body{ font-family:'Ubuntu',system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-weight:400; }
-body{
-  margin:0;
-  background:var(--bg);
-  color:#fff;
-  font-size:18px;
-  padding:0; /* was padding-top:20px */
+* { box-sizing: border-box; }
+html, body { 
+  font-family: 'Ubuntu', system-ui, -apple-system, Segoe UI, Roboto, sans-serif; 
+  font-weight: 400; 
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #fff;
+  font-size: 18px;
+  padding: 0;
+}
+@media (max-width: 700px) {
+  body { padding-top: 0; }
+}
+.container { 
+  width: 92%; 
+  max-width: 900px; 
+  margin: 16px auto; 
+  text-align: center; 
+}
+.page-center { 
+  display: block; 
+  min-height: unset; 
+  padding: 8px 0; 
 }
 
-/* Kill the old mobile override too (was 16px) */
-@media (max-width:700px){
-  body{ padding-top:0; }
-}.container{ width:92%; max-width:900px; margin:10px auto; text-align:center; }
-.page-center{ display:block; min-height:unset; padding:8px 0; }
+/* === Buttons (default 40px) === */
+.btn {
+  height: auto; 
+  min-height: 40px; 
+  display: inline-flex; 
+  align-items: center; 
+  justify-content: center;
+  border: 2px solid var(--black); 
+  color: #fff; 
+  font-size: 1.2rem;
+  
+  /* === ADD THIS LINE === */
+  letter-spacing: 0.5px;
+  /* ===================== */
 
-/* === Buttons (default 44px) === */
-.btn{
-  height:44px; display:inline-flex; align-items:center; justify-content:center;
-  border:2px solid var(--black); color:#fff; font-size:1.05rem;
-  padding:6px 12px; border-radius:6px; cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent;
+  padding: 6px 12px; 
+  line-height: 1.15; 
+  text-align: center;
+  white-space: normal;
+  border-radius: 6px; 
+  cursor: pointer; 
+  user-select: none; 
+  -webkit-tap-highlight-color: transparent;
 }
-.btn--orange{ background:var(--orange); }
-.btn--orange:hover{ background:var(--orange-d); }
-.btn--purple{ background:var(--purple); }
-.btn--purple:hover{ background:var(--purple-d); }
-.btn:disabled{ background:var(--orange-dim); cursor:not-allowed; }
-.btn-square{ width:44px; height:44px; padding:0; }
 
-/* Start & Tap match BPM input width (desktop) */
-#metroPlay, #tapTempoBtn{ min-width:7rem; white-space:nowrap; }
+.btn--orange { background: var(--orange); }
+.btn--orange:hover { background: var(--orange-d); }
+.btn--purple { background: var(--purple); }
+.btn--purple:hover { background: var(--purple-d); }
+.btn:disabled { background: var(--orange-dim); cursor: not-allowed; }
+.btn-square { width: 40px; height: 40px; padding: 0; }
+
+/* Focus styles */
+.btn:focus-visible,
+.selector:focus-visible,
+.picker__close:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+}
 
 /* === Select triggers & Inputs === */
-.selector{
-  width:11rem; max-width:100%; height:40px;
-  padding:6px 10px; font-size:1.05rem;
-  border:2px solid var(--black); border-radius:6px;
-  color:#fff; background:var(--orange); text-align:left;
+.selector {
+  width: auto; 
+  min-width: 4rem; 
+  flex: 1; 
+  max-width: 100%; 
+  height: auto; 
+  min-height: 40px; 
+  padding: 6px 12px; 
+  font-size: 1.2rem; 
+  line-height: 1.2;
+  border: 2px solid var(--black); 
+  border-radius: 6px;
+  color: #fff; 
+  background: var(--orange); 
+  text-align: left;
+  white-space: normal; 
+  overflow: visible;
+  display: flex; 
+  align-items: center;
+  -webkit-user-select: none; 
+  user-select: none; 
+  caret-color: transparent;
 }
-.selector--orange{ background:var(--orange); }
+.selector--orange { background: var(--orange); }
 
-/* Compact TS widgets (numerator & denominator) */
-.ts-compact{ width:5.2ch; min-width:0; text-align:center; padding-left:8px; padding-right:8px; }
-
-.visually-hidden{
-  position:absolute !important; left:-9999px !important; top:auto !important;
-  width:1px !important; height:1px !important; overflow:hidden !important;
-}
-
-.tempo-input{
-  width:7rem; height:44px; padding:8px; font-size:1.1rem;
-  border:2px solid var(--black); border-radius:6px;
-  background:#fff; color:#000; text-align:center;
-}
-.metro-label{ color:#fff; font-size:1.1rem; }
-.metro-slash{ color:#fff; font-weight:700; font-size:1.3rem; }
-
-/* === Slider (purple fill left side) === */
-.slider-fill{
-  --thumb:24px;
-  width:100%; height:16px; border-radius:6px;
-  box-shadow:inset 0 0 0 2px var(--black);
-  background:linear-gradient(to right,var(--purple) 0 0) no-repeat var(--bg-pos,0/0%), var(--gray-1);
-  -webkit-appearance:none; appearance:none;
-}
-.slider-fill::-webkit-slider-thumb{
-  -webkit-appearance:none; width:var(--thumb); height:var(--thumb);
-  background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
-}
-.slider-fill::-moz-range-thumb{
-  width:var(--thumb); height:var(--thumb);
-  background:#fff; border-radius:50%; border:2px solid var(--black); cursor:pointer;
+.visually-hidden {
+  position: absolute !important; left: -9999px !important; top: auto !important;
+  width: 1px !important; height: 1px !important; overflow: hidden !important;
 }
 
-/* iOS-only: make only the slider thumb interactive (prevents track-tap hijack) */
+.tempo-input {
+  width: 7rem; 
+  height: 40px; 
+  padding: 6px 12px; 
+  font-size: 1.1rem;
+  border: 2px solid var(--black); 
+  border-radius: 6px;
+  background: #fff; 
+  color: #000; 
+  text-align: center;
+}
+
+/* === Labels === */
+.metro-label { 
+  color: #fff; 
+  font-size: 1rem; 
+  white-space: nowrap;
+}
+
+/* === Sliders === */
+.slider-fill {
+  --thumb: 24px;
+  width: 100%; 
+  height: 16px; 
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 2px var(--black);
+  background: linear-gradient(to right, var(--purple) 0 0) no-repeat var(--bg-pos, 0/0%), var(--gray-1);
+  -webkit-appearance: none; 
+  appearance: none;
+}
+.slider--orange {
+  background: linear-gradient(to right, var(--orange) 0 0) no-repeat var(--bg-pos, 0/0%), var(--gray-1);
+}
+.slider-fill::-webkit-slider-thumb {
+  -webkit-appearance: none; 
+  width: var(--thumb); 
+  height: var(--thumb);
+  background: #fff; 
+  border-radius: 50%; 
+  border: 2px solid var(--black); 
+  cursor: pointer;
+}
+.slider-fill::-moz-range-thumb {
+  width: var(--thumb); 
+  height: var(--thumb);
+  background: #fff; 
+  border-radius: 50%; 
+  border: 2px solid var(--black); 
+  cursor: pointer;
+}
+
+/* iOS Thumb-only fix */
 .is-ios .slider-fill { touch-action: manipulation; }
 .is-ios .slider-fill::-webkit-slider-runnable-track { pointer-events: none; }
 .is-ios .slider-fill::-webkit-slider-thumb { pointer-events: auto; }
 
-/* === Panel & display === */
-.metro-panel{ width:100%; margin:0 auto; background:transparent; border:none; }
-.metro-display{ display:flex; flex-direction:column; align-items:center; gap:20px; margin-bottom:20px; }
-.bpm-line{ display:flex; align-items:center; justify-content:center; gap:20px; width:auto; }
-.bpm-stack{ display:flex; flex-direction:column; gap:20px; }
-.metro-bpm{ font-size:8rem; line-height:1; color:#fff; }
-#metroBpmValue{ display:inline-block; padding:0; border:0; border-radius:0; }
+/* === Panel & Display === */
+.metro-panel { width: 100%; margin: 0 auto; background: transparent; border: none; }
+.metro-display { display: flex; flex-direction: column; align-items: center; gap: 20px; margin-bottom: 20px; }
+.bpm-line { display: flex; align-items: center; justify-content: center; gap: 20px; width: auto; }
+.bpm-stack { display: flex; flex-direction: column; gap: 10px; }
+.metro-bpm { font-size: 8rem; line-height: 1; color: #fff; font-variant-numeric: tabular-nums; }
+#metroBpmValue { display: inline-block; padding: 0; border: 0; border-radius: 0; }
 
-/* Sections & cards */
-.metro-stack{ display:flex; flex-direction:column; gap:20px; }
-.card{ padding:12px; border-radius:12px; border:2px solid var(--black); background:var(--blue); box-sizing:border-box; }
-.metro-row{ display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:center; }
+@media (max-width: 900px) { .metro-bpm { font-size: 6.2rem; } }
+@media (max-width: 700px) { .bpm-line { margin: 10px 0; } }
 
-/* === Tempo row (card #1) === */
-.tempo-row{ align-items:center; }
-.transport-eq .btn, .transport-eq .tempo-input{ min-width:7rem; }
-.tempo-row #metroBpmRange{ flex:1 1 480px; min-width:220px; }
-
-/* Make ONLY the buttons in card #1 40px tall on all viewports */
-.tempo-row.transport-eq .btn{ height:40px; }
-
-/* Desktop: card #1 is one row: Start · Slider · BPM · Tap */
-@media (min-width:701px){
-  .tempo-row.transport-eq{
-    display:flex; flex-wrap:nowrap; align-items:center; gap:20px;
-  }
-  .tempo-row.transport-eq #metroBpmRange{
-    flex:1 1 auto; min-width:280px;
-  }
+/* Sections & Cards */
+.metro-stack { display: flex; flex-direction: column; gap: 20px; }
+.card { 
+  padding: 16px; 
+  border-radius: 12px; 
+  border: 2px solid var(--black); 
+  background: var(--blue); 
+  box-sizing: border-box; 
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
 }
 
-/* Mobile: row1 = Start | BPM | Tap, row2 = Slider */
-@media (max-width:700px){
-  .tempo-row.transport-eq{
-    display:grid; grid-template-columns: repeat(3, minmax(0,1fr));
-    grid-auto-rows: min-content; gap:20px; align-items:center; width:100%;
+/* === Tempo Row (Card #1) === */
+.tempo-row.transport-eq {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 20px; width: 100%;
+}
+.tempo-row.transport-eq .btn, 
+.tempo-row.transport-eq .tempo-input {
+  min-width: 7rem;
+}
+/* Slider wrapper for iOS thumb fix */
+.tempo-row.transport-eq .slider-wrap {
+  flex: 1 1 auto; 
+  min-width: 280px;
+}
+.tempo-row.transport-eq #metroBpmRange {
+  width: 100%;
+}
+
+/* Mobile: row1 = Start | BPM Input | Tap, row2 = Slider */
+@media (max-width: 700px) {
+  .tempo-row.transport-eq {
+    display: grid;
+    /* Create 3 equal columns for the buttons and input */
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-auto-rows: min-content; 
+    gap: 20px; 
+    align-items: center; 
+    width: 100%;
   }
+
+  /* Force buttons and input to fit their columns */
   .tempo-row.transport-eq .btn,
-  .tempo-row.transport-eq .tempo-input{
-    width:100%; min-width:0;
+  .tempo-row.transport-eq .tempo-input {
+    width: 100%; 
+    min-width: 0;
   }
-  #metroPlay, #tapTempoBtn{ min-width:0; }
-  .tempo-row.transport-eq #metroBpmRange{
-    grid-column:1 / -1; grid-row:2; min-width:0;
-  }
-}
 
-/* === Lights (main row) === */
-.metro-lights{
-  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(28px,1fr);
-  gap:20px; width:100%; margin:16px 0; /* requested 16px */
-}
-.metro-light{
-  height:48px; border:3px solid var(--black); border-radius:16px; background:var(--gray-1);
-  box-shadow:none; transform:scaleY(1); transition:transform .05s linear, background .05s linear, opacity .05s linear; cursor:pointer;
-}
-.metro-light.is-accent{ background:var(--purple); }
-.metro-light.is-beat{   background:var(--orange); }
-.metro-light.is-muted{  background:var(--blue-dim); opacity:1; }
-.metro-light.is-hit{ transform:scaleY(1.15); }
-
-/* === Subdivision lights container (never overflow; up to two balanced rows, centered) === */
-.metro-lights--subs{
-  display:flex;
-  flex-direction:column;
-  gap:20px;               /* requested subs gap */
-  width:100%;
-  margin:10px 0;
-}
-.metro-lights--subs .sub-row{
-  display:grid;
-  grid-auto-flow:column;
-  gap:20px;               /* keep spacing consistent within a row */
-  width:max-content;      /* row shrinks to its content so centering works */
-  margin-inline:auto;     /* center row when narrower than container */
-}
-
-/* Sub light visuals: tri-state; hit only animates (no color swap) */
-.sub-light{
-  height:16px;
-  border:3px solid var(--black);
-  border-radius:16px;
-  background:var(--orange);           /* default look (on) */
-  transition:transform .05s linear, background .05s linear;
-  cursor:pointer;
-}
-.sub-light.is-on{      background:var(--orange); }   /* normal */
-.sub-light.is-accent{  background:var(--purple); }   /* accent */
-.sub-light.is-muted{   background:var(--blue-dim); } /* none (same as main) */
-.sub-light.is-hit{ transform:scaleY(1.15); }
-
-/* === Config rows (card #2) — DESKTOP one line, items fill their columns === */
-.control-lines{ display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:center; }
-.control-line{ display:flex; align-items:center; gap:20px; }
-.control-inputs{ display:flex; align-items:center; gap:20px; }
-
-@media (min-width:701px){
-  .control-lines{
-    display:grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap:20px;
-    align-items:center;
-    width:100%;
-  }
-  .control-line{
-    display:grid;
-    grid-template-columns: auto 1fr;
-    gap:12px;
-    align-items:center;
-    width:100%;
-    white-space:nowrap;
-  }
-  .control-inputs{
-    justify-self:stretch; display:flex; align-items:center; gap:12px; width:100%;
-  }
-  .control-inputs > .selector{ width:100%; }
-  .control-inputs.ts .selector.ts-compact{ width:5.2ch; }
-}
-
-/* Mobile (unchanged) */
-@media (max-width:700px){
-  .control-lines{ flex-direction:column; align-items:stretch; gap:20px; }
-  .control-line{ justify-content:space-between; width:100%; }
-  .control-line .metro-label{ text-align:left; }
-  .control-inputs{ justify-content:flex-end; }
-}
-
-/* === Picker Overlay (modal) === */
-.picker{
-  position:fixed; inset:0; display:flex; align-items:flex-start; justify-content:center;
-  --picker-inline-pad: 4vw; padding: var(--picker-inline-pad);
-  background:rgba(0,0,0,.35);
-  backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%);
-  z-index:9999; animation: picker-fade-in .18s ease-out;
-}
-.picker[hidden]{ display:none !important; }
-.picker__panel{
-  width:min(520px, 100%); background:transparent; border:none; box-shadow:none; padding:0;
-  display:grid; grid-template-rows:auto 1fr; gap:10px; animation: panel-pop .22s cubic-bezier(.2,.8,.2,1); overscroll-behavior:contain;
-}
-.picker__header{
-  display:grid; grid-template-columns:1fr 40px; grid-template-areas:"title close" "search search";
-  align-items:center; gap:8px 10px; padding:8px; border:2px solid var(--black); border-radius:10px;
-}
-.picker--orange .picker__header{ background:var(--orange); }
-.picker__title{ grid-area:title; margin:0; font-size:1.2rem; line-height:1.2; color:#fff; }
-.picker__close{ grid-area:close; width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; font-size:1.4rem; line-height:1; cursor:pointer; background:#fff; color:#000; border:2px solid var(--black); border-radius:10px; }
-.picker__search{ grid-area:search; width:100%; height:40px; font-size:1rem; padding:6px 10px; background:#fff; color:#000; border:2px solid var(--black); border-radius:10px; }
-.picker__list{
-  list-style:none; margin:0; padding:6px; border:2px solid var(--black); border-radius:10px;
-  overflow-y:auto; max-height:calc(82vh - 80px); box-shadow:0 8px 24px rgba(0,0,0,.45);
-  background:var(--orange);
-}
-.picker__item{
-  padding:10px 12px; cursor:pointer; color:#fff; border-radius:5px; transition:none; touch-action:manipulation;
-}
-@media (hover:hover) and (pointer:fine){
-  .picker__item:hover{ background:var(--gray-3); }
-}
-.picker--orange .picker__item.is-active{ background:#fff; color:var(--orange); }
-
-/* Interaction guards */
-.picker__list, .picker__item{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-.selector, .selector:focus{ -webkit-user-select:none; user-select:none; caret-color:transparent; }
-.picker, .picker *{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; caret-color:transparent; }
-.picker .picker__search, .picker .picker__search *{ -webkit-user-select:text !important; user-select:text !important; caret-color:auto !important; }
-
-/* Animations */
-@keyframes picker-fade-in{ from{ opacity:0; } to{ opacity:1; } }
-@keyframes panel-pop{ from{ opacity:0; transform:translateY(12px) scale(.98); } to{ opacity:1; transform:translateY(0) scale(1); } }
-
-/* Responsive type */
-@media (max-width:900px){ .metro-bpm{ font-size:6.2rem; } }
-@media (max-width:700px){
-  .bpm-line{ margin:20px 0; }
-}
-
-/* Disable hover on coarse pointers */
-@media (hover:none) and (pointer:coarse){
-  .btn--orange:hover{ background:var(--orange); }
-  .btn--purple:hover{ background:var(--purple); }
-}
-
-/* Match BPM input height to 40px */
-.tempo-input{ height:40px; padding-top:6px; padding-bottom:6px; }
-
-
-/* Optional: visible keyboard focus */
-.btn:focus-visible,
-.selector:focus-visible,
-.picker__close:focus-visible {
-  outline:3px solid #fff;
-  outline-offset:2px;
-}
-
-/* Optional: give the app a bit of breathing room without shifting the whole page */
-.container{ margin:16px auto; } /* was 10px */
-
-@media (max-width:700px){
-  .tempo-row.transport-eq{
-    display:grid;
-    grid-template-columns: repeat(3, minmax(0,1fr));
-    grid-auto-rows: min-content;
-    gap:20px; align-items:center; width:100%;
-  }
-  .tempo-row.transport-eq #metroBpmRange{
-    grid-column: 1 / 4;   /* span all three columns */
-    grid-row: 2 / 3;      /* force onto the second row */
+  /* Explicitly target both the Input ID and the Wrapper Class 
+     so this works on both iOS (wrapped) and Android/Desktop (unwrapped) */
+  .tempo-row.transport-eq #metroBpmRange,
+  .tempo-row.transport-eq .slider-wrap {
+    grid-column: 1 / -1; /* Span all 3 columns */
+    grid-row: 2;         /* Force onto the second row */
+    width: 100%;
     min-width: 0;
   }
 }
 
-/* Make main lights behave like subs: stacked rows, centered, never overflow */
-.metro-lights{
-  display: flex;           /* instead of grid auto-flow columns */
+/* === Lights (Main) === */
+.metro-lights {
+  display: flex;
   flex-direction: column;
   gap: 20px;
   width: 100%;
-  margin: 16px 0;
+  margin: 16px 0px 0px 0px;
 }
-.metro-lights .main-row{
+.main-row {
   display: grid;
   grid-auto-flow: column;
   gap: 20px;
-  width: max-content;
-  margin-inline: auto;
+  width: 100%; /* Forces the row to fill the parent */
 }
 
-/* iOS slider wrapper takes the layout role of the slider */
-@media (min-width:701px){
-  .tempo-row.transport-eq .slider-wrap{
-    flex: 1 1 auto;
-    min-width: 280px;
+.metro-light {
+  height: 48px; 
+  border: 3px solid var(--black); 
+  border-radius: 16px; 
+  background: var(--gray-1);
+  transition: transform .05s linear, background .05s linear, filter .05s; 
+  cursor: pointer;
+}
+.metro-light.is-accent { background: var(--purple); }
+.metro-light.is-beat { background: var(--orange); }
+.metro-light.is-muted { background: var(--blue-dim); opacity: 1; }
+.metro-light.is-hit { transform: scale(1.05); filter: brightness(1.3); border-color: #fff; }
+
+/* === Lights (Subdivisions) === */
+.metro-lights--subs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 10px auto;
+}
+.sub-row-generated {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+}
+.sub-group {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 10px;
+  min-width: 0;
+}
+.sub-light {
+  flex: 1 1 auto;
+  height: 32px;            
+  min-width: 10px;
+  border: 3px solid var(--black); 
+  border-radius: 11px;
+  background: var(--orange);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform .05s, background .05s, filter .05s;
+}
+.sub-light.is-on { background: var(--orange); }
+.sub-light.is-accent { background: var(--purple); }
+.sub-light.is-muted { background: var(--blue-dim); opacity: 1; }
+.sub-light.is-hit { transform: scale(1.05); filter: brightness(1.3); border-color: #fff; }
+
+
+/* === Volume Card (Grid Layout) === */
+.volume-card { display: flex; flex-direction: column; gap: 16px; }
+.volume-block { display: contents; } 
+.volume-row { display: flex; align-items: center; gap: 12px; width: 100%; }
+.volume-card .metro-label { text-align: left; }
+.volume-card .microtext { 
+  flex: 0 0 5.2ch; 
+  text-align: right; 
+  font-variant-numeric: tabular-nums; 
+  font-size: 0.95rem; 
+}
+.volume-card .slider-fill { flex: 1; min-width: 0; }
+
+@media (min-width: 701px) {
+  .volume-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 5.2ch; /* Label | Slider | Value */
+    column-gap: 20px; 
+    row-gap: 16px; 
+    align-items: center;
   }
-}
-@media (max-width:700px){
-  .tempo-row.transport-eq .slider-wrap{
-    grid-column: 1 / -1;   /* put slider on row 2, full width */
-    grid-row: 2;
-    min-width: 0;
-  }
+  .volume-card .volume-row { display: contents; }
+  .volume-card .metro-label { grid-column: 1; }
+  #mainVolRange, #subVolRange { grid-column: 2; width: 100%; }
+  #mainVolValue, #subVolValue { grid-column: 3; justify-self: end; }
 }
 
-/* Orange variant for volume sliders */
-.slider--orange{
-  background:linear-gradient(to right,var(--orange) 0 0) no-repeat var(--bg-pos,0/0%), var(--gray-1);
+
+/* === Settings Grid (Replaces old .control-lines) === */
+.control-grid {
+  display: grid;
+  /* Auto-fit columns: Nice on desktop (3 cols), stacks on mobile (1 col) */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px 30px; /* Row gap 20px, Col gap 30px */
+  width: 100%;
+  align-items: end; /* Align bottoms of inputs */
 }
 
-/* === Volume card — Mobile stacked; Desktop grid (label | slider | %) === */
-.volume-card{ display:flex; flex-direction:column; gap:16px; }
-.volume-card .volume-block{ display:flex; flex-direction:column; gap:10px; }
-.volume-card .metro-label{ text-align:left; }
-.volume-card .volume-row{ display:flex; align-items:center; gap:12px; width:100%; }
-.volume-card .volume-row .slider-fill{ flex:1 0 0%; min-width:0; }
-.volume-card .microtext{ flex:0 0 5.2ch; inline-size:5.2ch; text-align:right; font-variant-numeric:tabular-nums; font-size:0.95rem; }
+.setting-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px; /* Space between Label and Input */
+  width: 100%;
+}
 
-@media (min-width:701px){
-  .volume-card{
-    display:grid;
-    grid-template-columns:auto minmax(0,1fr) 5.2ch; /* label | slider | % */
-    column-gap:12px; row-gap:16px; align-items:center; width:100%;
-  }
-  .volume-card .volume-block, .volume-card .volume-row{ display:contents; }
-  .volume-card .volume-block > .metro-label{ grid-column:1; justify-self:start; white-space:nowrap; }
-  #mainVolRange, #subVolRange{ grid-column:2; width:100%; }
-  #mainVolValue, #subVolValue{ grid-column:3; justify-self:end; }
+.setting-col .metro-label {
+  text-align: left;
+  margin-left: 2px;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+/* Ensure selectors fill their containers */
+.input-group .selector {
+  width: 100%;
+  text-align: left;
+}
+
+/* Time Signature Slash */
+.metro-slash {
+  font-size: 1.5rem;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.7);
+  padding-bottom: 2px;
+}
+
+
+/* === Picker Overlay (Modal) === */
+.picker {
+  position: fixed; inset: 0; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  
+  /* CHANGED: Fixed 20px safety margin on all sides */
+  padding: 20px;
+  
+  background: rgba(0, 0, 0, .35);
+  backdrop-filter: blur(6px) saturate(120%); 
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  z-index: 9999; 
+  animation: picker-fade-in .18s ease-out;
+
+  /* Dynamic height to respect keyboard */
+  height: 100vh; 
+  height: 100dvh; 
+}
+
+.picker[hidden] { display: none !important; }
+
+.picker__panel {
+  width: min(520px, 100%); 
+  
+  /* CHANGED: limit height to viewport so it fits above keyboard */
+  max-height: 85vh;
+  max-height: 85dvh;
+  
+  background: transparent; 
+  border: none; 
+  box-shadow: none; 
+  padding: 0;
+  
+  display: flex;          /* CHANGED: Use Flex column */
+  flex-direction: column; /* Stack Header + List */
+  gap: 10px; 
+  
+  animation: panel-pop .22s cubic-bezier(.2, .8, .2, 1); 
+  overscroll-behavior: contain;
+}
+
+.picker__header {
+  /* Keep header rigid */
+  flex: 0 0 auto;
+  
+  display: grid; 
+  grid-template-columns: 1fr 40px; 
+  grid-template-areas: "title close" "search search";
+  align-items: center; 
+  gap: 8px 10px; 
+  padding: 8px; 
+  border: 2px solid var(--black); 
+  border-radius: 10px;
+}
+.picker--orange .picker__header { background: var(--orange); }
+.picker__title { grid-area: title; margin: 0; font-size: 1.2rem; line-height: 1.2; color: #fff; }
+.picker__close { 
+  grid-area: close; width: 40px; height: 40px; 
+  display: inline-flex; align-items: center; justify-content: center; 
+  font-size: 1.4rem; line-height: 1; cursor: pointer; 
+  background: #fff; color: #000; 
+  border: 2px solid var(--black); border-radius: 10px; 
+}
+.picker__search { 
+  grid-area: search; width: 100%; height: 40px; 
+  font-size: 1rem; padding: 6px 12px; 
+  background: #fff; color: #000; 
+  border: 2px solid var(--black); border-radius: 10px; 
+}
+
+.picker__list {
+  /* CHANGED: Allow list to shrink/scroll within the remaining space */
+  flex: 1 1 auto; 
+  min-height: 0; /* Important for flex scrolling */
+  overflow-y: auto; 
+
+  list-style: none; margin: 0; padding: 6px; 
+  border: 2px solid var(--black); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  background: var(--orange);
+}
+.picker__item {
+  padding: 10px 12px; cursor: pointer; color: #fff; 
+  border-radius: 5px; transition: none; touch-action: manipulation;
+}
+@media (hover: hover) and (pointer: fine) {
+  .picker__item:hover { background: var(--gray-3); }
+}
+.picker--orange .picker__item.is-active { background: #fff; color: var(--orange); }
+
+/* Interaction guards */
+.picker__list, .picker__item { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.picker, .picker * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; caret-color: transparent; }
+.picker .picker__search, .picker .picker__search * { -webkit-user-select: text !important; user-select: text !important; caret-color: auto !important; }
+
+/* Animations */
+@keyframes picker-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Disable hover on coarse pointers */
+@media (hover: none) and (pointer: coarse) {
+  .btn--orange:hover { background: var(--orange); }
+  .btn--purple:hover { background: var(--purple); }
 }
