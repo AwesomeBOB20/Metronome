@@ -454,11 +454,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const mult = parseInt(subMultSel?.value || '1', 10);
     const lightsPerGroup = totalLights / mult;
 
-    // Create the container Row (Grid with 'mult' columns)
+    // Create the container Row
     const row = document.createElement('div');
     row.className = 'sub-row-generated';
     row.style.display = 'grid';
-    row.style.gridTemplateColumns = `repeat(${mult}, 1fr)`; 
+    
+    // LOGIC CHANGE: If multiplier is 4, wrap into 2 columns (2x2). 
+    // Otherwise keep 1 row (1, 2, or 3 cols) to avoid being too tight.
+    const cols = (mult === 4) ? 2 : mult;
+    row.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    
     row.style.gap = '20px'; // Matches main Metro Lights gap
     row.style.width = '100%';
 
@@ -1226,7 +1231,7 @@ if (coincide){
   const defaults = {
     bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
     mainVol: 100, // Beat volume default now 100%
-    subVol : 80
+    subVol : 85
   };
 
   function applyDefaultsOnLoad(){
@@ -1270,4 +1275,3 @@ if (coincide){
 
   applyDefaultsOnLoad();
 });
-
