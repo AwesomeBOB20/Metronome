@@ -37,6 +37,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const tsDenTrigger  = $('#tsDenTrigger');
   const subdivTrigger = $('#subdivTrigger');
   const soundTrigger  = $('#soundTrigger');
+  const subMultSel    = $('#subMultSel'); 
+  const subMultTrigger= $('#subMultTrigger'); 
 
   const lightsWrap    = $('#metroLights'); // main lights
   const subLightsWrap = $('#subLights');   // subdivision lights
@@ -87,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('click',       rm);
   }
   [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn,
-   tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(wirePressedVisual);
+   tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger, subMultTrigger].forEach(wirePressedVisual);
 
   // Enable :active-like behavior on iOS
   document.addEventListener('touchstart', function(){}, { passive:true });
@@ -267,7 +269,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger, subMultTrigger].forEach(el=> el && attachPicker(el));
   // Click-outside-to-close (robust) + Esc
   const PANEL_SELECTOR = '.picker__panel, .picker-panel, .picker, [role="dialog"], [data-panel], [data-modal-panel]';
   function getPickerPanel(){
@@ -309,8 +311,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function subsLightsCount(){
     const {a} = getSubdivParts();
-    return Math.max(0, Math.floor(a));
+    const raw = Math.max(0, Math.floor(a));
+    // Multiply by the selected value (default 1)
+    const mult = subMultSel ? (parseInt(subMultSel.value, 10) || 1) : 1;
+    return raw * mult;
   }
+
   function isQuartersSubdiv(){
     const {a,b} = getSubdivParts();
     return a === 1 && b === 1; // 1/1
@@ -325,6 +331,31 @@ document.addEventListener('DOMContentLoaded', () => {
     return arr;
   }
 
+
+// Returns array of counts per row, e.g. [10, 10] for 20 items
+  function getBalancedRows(total, containerWidth, itemWidth, gap){
+    if (total <= 0) return [];
+    
+    // How many can fit in one raw line?
+    const maxPerRow = Math.max(1, Math.floor((containerWidth + gap) / (itemWidth + gap)));
+    
+    // If all fit, just return one row
+    if (total <= maxPerRow) return [total];
+    
+    // Otherwise, calculate balanced distribution
+    const rowCount = Math.ceil(total / maxPerRow);
+    const basePer = Math.floor(total / rowCount);
+    const remainder = total % rowCount;
+    
+    const rows = [];
+    for(let i=0; i<rowCount; i++){
+      // Distribute the remainder (extra items) to the first few rows
+      rows.push(basePer + (i < remainder ? 1 : 0));
+    }
+    return rows;
+  }
+
+
   function renderLights(){
     if (!lightsWrap) return;
 
@@ -332,79 +363,38 @@ document.addEventListener('DOMContentLoaded', () => {
     const beats = clampInt(tsNum.value,1,12);
     if (!beatStates.length || beatStates.length !== beats) beatStates = defaultBeatStates();
 
-    // Measure container and decide single-row vs two-row
     const cw = lightsWrap.clientWidth || lightsWrap.getBoundingClientRect().width || 0;
     const style = getComputedStyle(lightsWrap);
     const gap = parseFloat(style.gap || '20') || 20;
-    const MIN_CELL = 28; // px
+    const MIN_CELL = 28; // Minimum comfortable width for calculation
 
-    const fitsSingleRow = (count)=> {
-      if (count <= 0) return true;
-      const totalGaps = gap * Math.max(0, count-1);
-      const cellW = (cw - totalGaps) / count;
-      return cellW >= MIN_CELL;
-    };
+    // Calculate balanced rows
+    const rows = getBalancedRows(beats, cw, MIN_CELL, gap);
 
-    const n = beats;
-
-    if (fitsSingleRow(n)){
+    let globalIndex = 0;
+    rows.forEach(count => {
       const row = document.createElement('div');
       row.className = 'main-row';
-      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
-      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
-      row.style.width = 'max-content';
-      row.style.marginInline = 'auto';
+      
+      // === CHANGE: Use 1fr to stretch full width instead of calculated pixels ===
+      row.style.gridTemplateColumns = `repeat(${count}, 1fr)`;
+      row.style.width = '100%'; 
+      // =======================================================================
 
-      for (let i=0;i<n;i++){
+      for (let i=0; i<count; i++){
+        const beatIdx = globalIndex++;
         const d = document.createElement('div');
         d.className = 'metro-light';
-        applyBeatClass(d, beatStates[i]);
+        applyBeatClass(d, beatStates[beatIdx]);
         d.title = 'Click: Normal → Accent → None';
         d.addEventListener('click', ()=>{
-          beatStates[i] = (beatStates[i] === 1) ? 2 : (beatStates[i] === 2 ? 0 : 1);
-          applyBeatClass(d, beatStates[i]);
+          beatStates[beatIdx] = (beatStates[beatIdx] === 1) ? 2 : (beatStates[beatIdx] === 2 ? 0 : 1);
+          applyBeatClass(d, beatStates[beatIdx]);
         });
         row.appendChild(d);
       }
       lightsWrap.appendChild(row);
-    } else {
-      let topCount    = Math.ceil(n/2);
-      let bottomCount = n - topCount;
-
-      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
-      if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
-      if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
-
-      const maxCount = Math.max(topCount, bottomCount);
-      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
-
-      const rowTop = document.createElement('div');
-      rowTop.className = 'main-row';
-      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
-      rowTop.style.width = 'max-content';
-      rowTop.style.marginInline = 'auto';
-
-      const rowBottom = document.createElement('div');
-      rowBottom.className = 'main-row';
-      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
-      rowBottom.style.width = 'max-content';
-      rowBottom.style.marginInline = 'auto';
-
-      for (let i=0;i<n;i++){
-        const d = document.createElement('div');
-        d.className = 'metro-light';
-        applyBeatClass(d, beatStates[i]);
-        d.title = 'Click: Normal → Accent → None';
-        d.addEventListener('click', ()=>{
-          beatStates[i] = (beatStates[i] === 1) ? 2 : (beatStates[i] === 2 ? 0 : 1);
-          applyBeatClass(d, beatStates[i]);
-        });
-        (i < topCount ? rowTop : rowBottom).appendChild(d);
-      }
-
-      lightsWrap.appendChild(rowTop);
-      lightsWrap.appendChild(rowBottom);
-    }
+    });
   }
 
   function applyBeatClass(el, state){
@@ -421,7 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderSubLights(){
     if (!subLightsWrap) return;
 
-    // Quarters: hide lights (audio is also disabled in scheduler)
+    // 1. Check if we should show anything
     if (isQuartersSubdiv()){
       subLightsWrap.hidden = true;
       subLightsWrap.innerHTML = '';
@@ -429,8 +419,13 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const n = subsLightsCount();
-    if (n <= 0){
+    // 2. Determine Group Size and Count
+    const {a} = getSubdivParts(); 
+    const groupSize = Math.max(1, Math.floor(a));
+    const mult = subMultSel ? (parseInt(subMultSel.value, 10) || 1) : 1;
+    const totalLights = groupSize * mult;
+
+    if (totalLights <= 0){
       subLightsWrap.hidden = true;
       subLightsWrap.innerHTML = '';
       subStates = [];
@@ -438,81 +433,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     subLightsWrap.hidden = false;
 
-    if (!subStates.length || subStates.length !== n) subStates = defaultSubStates(n);
-
-    const cw = subLightsWrap.clientWidth || subLightsWrap.getBoundingClientRect().width || 0;
-    const style = getComputedStyle(subLightsWrap);
-    const gap = parseFloat(style.gap || '20') || 20;
-    const MIN_CELL = 28;
-
-    const fitsSingleRow = (count)=> {
-      if (count <= 0) return true;
-      const totalGaps = gap * Math.max(0, count-1);
-      const cellW = (cw - totalGaps) / count;
-      return cellW >= MIN_CELL;
-    };
+    // 3. Sync State Array
+    if (!subStates.length || subStates.length !== totalLights) {
+      subStates = defaultSubStates(totalLights);
+    }
 
     subLightsWrap.innerHTML = '';
 
-    if (fitsSingleRow(n)){
-      const row = document.createElement('div');
-      row.className = 'sub-row';
-      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
-      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
-      row.style.width = 'max-content';
-      row.style.marginInline = 'auto';
+    // 4. Measure for "Group" Balancing
+    const cw = subLightsWrap.clientWidth || subLightsWrap.getBoundingClientRect().width || 0;
+    
+    // CONFIG: Updated to match your new CSS
+    const MIN_CLICK_W = 34; // Minimum width to maintain touch target size
+    const LIGHT_GAP = 8;    // Matches the new .sub-group gap
+    const GROUP_GAP = 20;   // Matches the .sub-row-generated gap (metro style)
+    
+    // Calculate theoretical width of ONE group
+    const singleGroupMinW = (groupSize * MIN_CLICK_W) + (Math.max(0, groupSize - 1) * LIGHT_GAP);
 
-      for (let i=0;i<n;i++){
-        const d = document.createElement('div');
-        d.className = 'sub-light';
-        applySubClass(d, subStates[i]);
-        d.title = 'Click: Normal → Accent → None';
-        d.addEventListener('click', ()=>{
-          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
-          applySubClass(d, subStates[i]);
-        });
-        row.appendChild(d);
+    // 5. Calculate how many groups fit per row
+    const groupsPerBalancedRow = getBalancedRows(mult, cw, singleGroupMinW, GROUP_GAP);
+
+    // 6. Render
+    let globalLightIndex = 0;
+
+    groupsPerBalancedRow.forEach(groupCountForRow => {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'sub-row-generated';
+
+      for (let g = 0; g < groupCountForRow; g++) {
+        const groupEl = document.createElement('div');
+        groupEl.className = 'sub-group';
+
+        for (let i = 0; i < groupSize; i++) {
+          const idx = globalLightIndex++;
+          const d = document.createElement('div');
+          d.className = 'sub-light';
+          
+          applySubClass(d, subStates[idx]);
+          d.title = 'Click: Normal → Accent → None';
+          
+          d.addEventListener('click', (e)=>{
+            e.preventDefault(); e.stopPropagation();
+            subStates[idx] = (subStates[idx] === 1) ? 2 : (subStates[idx] === 2 ? 0 : 1);
+            applySubClass(d, subStates[idx]);
+          });
+          groupEl.appendChild(d);
+        }
+        rowEl.appendChild(groupEl);
       }
-      subLightsWrap.appendChild(row);
-
-    } else {
-      let topCount    = Math.ceil(n/2);
-      let bottomCount = n - topCount;
-
-      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
-      if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
-      if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
-
-      const maxCount = Math.max(topCount, bottomCount);
-      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
-
-      const rowTop = document.createElement('div');
-      rowTop.className = 'sub-row';
-      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
-      rowTop.style.width = 'max-content';
-      rowTop.style.marginInline = 'auto';
-
-      const rowBottom = document.createElement('div');
-      rowBottom.className = 'sub-row';
-      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
-      rowBottom.style.width = 'max-content';
-      rowBottom.style.marginInline = 'auto';
-
-      for (let i=0;i<n;i++){
-        const d = document.createElement('div');
-        d.className = 'sub-light';
-        applySubClass(d, subStates[i]);
-        d.title = 'Click: Normal → Accent → None';
-        d.addEventListener('click', ()=>{
-          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
-          applySubClass(d, subStates[i]);
-        });
-        (i < topCount ? rowTop : rowBottom).appendChild(d);
-      }
-
-      subLightsWrap.appendChild(rowTop);
-      subLightsWrap.appendChild(rowBottom);
-    }
+      subLightsWrap.appendChild(rowEl);
+    });
   }
 
   function applySubClass(el, state){
@@ -577,11 +548,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // === LOUDNESS KNOBS (tweak these) ===
   const HOT_MODE     = true;   // leave true for louder output
-  const DRIVE_DB     = 8;     // pre-clip drive (≈4x). Try 14–18 for more
-  const PRESENCE_DB  = 4;      // peaking EQ boost around 2.6 kHz
+  const DRIVE_DB     = 3;      // was 8. Reduced input drive to lower volume
+  const PRESENCE_DB  = 2;      // was 4. Reduced presence slightly for less harshness
   const HPF_HZ       = 110;    // high-pass to save headroom
-  const CLIP_K       = 2.4;    // soft-clip strength (tanh curve)
-  const MAKEUP_DB    = 0;      // post-clip makeup gain (≈2x)
+  const CLIP_K       = 2.0;    // soft-clip strength (tanh curve)
+  const MAKEUP_DB    = -2.0;   // was 0. Negative gain to lower final output
 
   // Utility
   const dbToGain = db => Math.pow(10, db/20);
@@ -1176,6 +1147,20 @@ if (coincide){
     alignToGrid(true);
   }));
 
+  // Multiplier change
+  if (subMultSel) {
+    subMultSel.addEventListener('change', () => {
+      // Sync Trigger Text
+      if (subMultTrigger) subMultTrigger.value = subMultSel.options[subMultSel.selectedIndex]?.text || '';
+      
+      // Re-render subdivision lights based on new count
+      const n = subsLightsCount();
+      subStates = n > 0 ? defaultSubStates(n) : [];
+      renderSubLights();
+      alignToGrid(true); // Re-align to restart the (potentially longer) loop
+    });
+  }
+
   soundSel && soundSel.addEventListener('change', ()=>{
     if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
     ensurePresetSamples(); // update buffers for new preset
@@ -1214,7 +1199,7 @@ if (coincide){
   const defaults = {
     bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
     mainVol: 100, // Beat volume default now 100%
-    subVol : 70
+    subVol : 85   // Updated to 85%
   };
 
   function applyDefaultsOnLoad(){
@@ -1222,6 +1207,7 @@ if (coincide){
     if (tsNum)     tsNum.value     = defaults.tsNum;
     if (tsDen)     tsDen.value     = defaults.tsDen;
     if (subdivSel) subdivSel.value = defaults.subdiv;   // quarters
+    if (subMultSel) subMultSel.value = "1";             // Reset multiplier to x1
     if (soundSel)  soundSel.value  = defaults.sound;
     if (bpmRange)  updateSliderFill(bpmRange);
 
@@ -1240,6 +1226,7 @@ if (coincide){
     if (tsDenTrigger)  tsDenTrigger.value  = tsDen.options[tsDen.selectedIndex]?.text || '';
     if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
     if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
+    if (subMultTrigger && subMultSel) subMultTrigger.value = subMultSel.options[subMultSel.selectedIndex]?.text || '';
 
     ensureCtx(); if (audioCtx) ensurePresetSamples();
 
