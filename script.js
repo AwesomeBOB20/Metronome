@@ -1,551 +1,150 @@
-document.addEventListener('DOMContentLoaded', function () {
-  // ===== Data =====
-  const exercises  = Array.isArray(window.EXERCISES)  ? window.EXERCISES  : [];
-  const playlists  = Array.isArray(window.PLAYLISTS)  ? window.PLAYLISTS  : [];
+/* === METRONOME — iOS-first fixes: one-tap start, pre-rendered clicks for crisp sound,
+       smooth main-light transitions, thumb-only slider; main lights wrap to 2 rows;
+       quarter-note subs silent; numerator auto-set: denom=3→3, denom=2→4, else unchanged.
+       + Beat/Sub volume sliders wired
+       + Picker: click-outside-to-close, Esc to close, hide list on no matches
+       + iOS first-tap audio unlock on Start
+       + Default Beat volume = 100%
+       + Unified play toggle (pointerup) + instant mute on stop
+       + HOT output chain (drive + EQ + soft clip + makeup) for loudness === */
+document.addEventListener('DOMContentLoaded', () => {
+  const $  = (s,root=document)=>root.querySelector(s);
+  const $$ = (s,root=document)=>Array.from(root.querySelectorAll(s));
+  const root = $('#metronome'); if (!root) return;
 
-// DOM
-  const audio               = document.getElementById('audio');
-  const totalTimeDisplay    = document.getElementById('totalTime');
-  const currentTimeDisplay  = document.getElementById('currentTime');
-  const playPauseBtn        = document.getElementById('playPauseBtn');
-  const tempoSlider         = document.getElementById('tempoSlider');
-  const tempoLabel          = document.getElementById('tempoLabel');
-  const sheetMusicImg       = document.querySelector('.sheet-music img');
+  if (window.__METRO_BOUND__) return;
+  window.__METRO_BOUND__ = true;
 
-  // Progress bar (track)
-  const progressContainer   = document.querySelector('.progress-container .bar');
-  let   progress            = document.getElementById('progress') || document.querySelector('.bar__fill');
+  /* ---------------- Elements ---------------- */
+  const playBtn = $('#metroPlay');
+  const tapBtn  = $('#tapTempoBtn');
 
-  // Transport / randomize / limits
-  const randomExerciseBtn   = document.getElementById('randomExerciseBtn');
-  const randomTempoBtn      = document.getElementById('randomTempoBtn');
-  const minTempoInput       = document.getElementById('minTempo');
-  const maxTempoInput       = document.getElementById('maxTempo');
-  const autoRandomizeToggle = document.getElementById('autoRandomizeToggle');
-  const repsPerTempoInput   = document.getElementById('repsPerTempo');
+  const bpmDec1Btn = $('#bpmDec1');
+  const bpmDec5Btn = $('#bpmDec5');
+  const bpmInc1Btn = $('#bpmInc1');
+  const bpmInc5Btn = $('#bpmInc5');
 
-  // Tempo Step (Dial)
-  const bumpTempoBtn        = document.getElementById('bumpTempoBtn');
-  const autoTempoStepToggle = document.getElementById('autoTempoStepToggle');
-  const dialRepsInput       = document.getElementById('dialReps');
-  const dialStepInput       = document.getElementById('dialStep');
-  const tempoStepContainer  = document.getElementById('tempoStepContainer');
+  const bpmRange   = $('#metroBpmRange');
+  const bpmInput   = $('#metroBpmInput');
+  const bpmDisplay = $('#metroBpmValue');
 
-  // Playlist buttons and progress
-  const stopPlaylistBtn            = document.getElementById('stopPlaylistBtn');
-  const prevPlaylistItemBtn        = document.getElementById('prevPlaylistItemBtn');
-  const nextPlaylistItemBtn        = document.getElementById('nextPlaylistItemBtn');
-  const playlistProgressContainer  = document.querySelector('.playlist-progress-container');
-  const playlistProgress           = document.getElementById('playlistProgress');
-  const playlistProgressPercentage = document.getElementById('playlistProgressPercentage');
+  const tsNum     = $('#metroTSNum');
+  const tsDen     = $('#metroTSDen');
+  const subdivSel = $('#metroSubdivision');
+  const soundSel  = $('#metroSound');
 
-  // Overlay root (text container centered over playlist bar)
-  const playlistTimeOverlay = document.querySelector('.playlist-time-overlay');
+  const tsNumTrigger  = $('#tsNumTrigger');
+  const tsDenTrigger  = $('#tsDenTrigger');
+  const subdivTrigger = $('#subdivTrigger');
+  const soundTrigger  = $('#soundTrigger');
 
-  // Top selectors
-  const categorySearchInput      = document.getElementById('categorySearch');
-  const exerciseSearchInput      = document.getElementById('exerciseSearch');
-  const playlistSearchInput      = document.getElementById('playlistSearch');
-  const playlistQueueSearchInput = document.getElementById('playlistQueueSearch');
+  const lightsWrap    = $('#metroLights'); // main lights
+  const subLightsWrap = $('#subLights');   // subdivision lights
 
-  // Picker overlay
-  const pickerOverlay = document.getElementById('pickerOverlay');
-  const pickerTitle   = document.getElementById('pickerTitle');
-  const pickerSearch  = document.getElementById('pickerSearch');
-  const pickerList    = document.getElementById('pickerList');
-  const pickerClose   = document.getElementById('pickerClose');
+  // Volume card elements (Beat/Sub)
+  const mainVolRange = $('#mainVolRange');
+  const mainVolValue = $('#mainVolValue');
+  const subVolRange  = $('#subVolRange');
+  const subVolValue  = $('#subVolValue');
 
-  // ===== Feature flags =====
-  const isTouchDevice =
-    (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
-    ('ontouchstart' in window) ||
-    (navigator.maxTouchPoints > 0);
-
-  const isFxAndroid = /Android/i.test(navigator.userAgent) && /Firefox/i.test(navigator.userAgent);
-
-  // ===== Helpers: selector value/data-id =====
-  function setSelectorValue(input, label, id) {
-    if (!input) return;
-    input.value = label ?? '';
-    if (id == null) delete input.dataset.id;
-    else input.dataset.id = String(id);
-  }
-  function getSelectorId(input) {
-    return input?.dataset?.id ?? null;
-  }
-
-  // ===== State =====
-  let isDragging               = false; // progress bar drag
-  let isPlayingPlaylist        = false;
-  let currentPlaylist          = null;
-  let currentPlaylistItemIndex = 0;
-  let currentTempoIndex        = 0;
-  let currentRepetition        = 0;
-  let playlistQueueMap         = [];    // flattened queue
-
-  let isRandomizeEnabled = false;
-  let repsBeforeChange   = 1;
-  let currentRepCount    = 0;
-
-  // Tempo Step (Dial) state
-  let tempoStepEnabled    = false; // mirrors autoTempoStepToggle
-  let tempoStepReps       = 1;     // >= 1
-  let tempoStepStep       = 0;     // can be negative
-  let tempoStepRepCounter = 0;     // counts track finishes since last reset
-
-  let displayedExercises      = [];
-  let currentExerciseIndex    = 0;
-  let currentSelectedExercise = null;
-
-  let currentOriginalTempo    = null;
-  let userIsAdjustingTempo    = false;
-  let suppressTempoInput      = false;
-  let lastTempoChangeAt       = 0;
-  let prevTempo               = null;
-
-  // NEW: overlay display mode (default to time)
-  let playlistOverlayMode = 'time'; // 'time' | 'percent'
-
-  // NEW: exercise lookups and duration cache (seconds @ 1x per exercise)
-  const exById = new Map(exercises.map(e => [e.id, e]));
-  const durationCache = new Map();
-
-  // Category set & display names
-  let displayedCategories = [
-    "all","one-handers","accent-tap","rhythms","rudiments","timing",
-    "paradiddles","singles","rolls","natural-decays","flams","hybrids",
-    "78-grids","juxtapositions","exercises","etudes","requests"
-  ];
-  const categoryDisplayMap = {
-    "accent-tap":"Accent Tap","rhythms":"Rhythms","rudiments":"Rudiments","requests":"Requests",
-    "one-handers":"One Handers","timing":"Timing","paradiddles":"Paradiddles","singles":"Singles",
-    "rolls":"Rolls","natural-decays":"Natural Decays","flams":"Flams","hybrids":"Hybrids",
-    "78-grids":"7/8 Grids","juxtapositions":"Juxtapositions","exercises":"Exercises","etudes":"Etudes","all":"All Categories"
-  };
-
-  const displayedPlaylists = playlists.map((p, i) => ({ index: i, name: p.name }));
-
-  // ===== Audio defaults =====
-  if (audio) {
-    audio.loop = false;
-    if ('preservesPitch' in audio)       audio.preservesPitch = true;
-    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
-    if ('mozPreservesPitch' in audio)    audio.mozPreservesPitch = true;
-  }
-
-  // ===== FAST PRESS helper (fires on pointerdown, suppress following click) =====
-  function addFastPress(el, handler) {
+  try { if (playBtn) playBtn.type = 'button'; } catch {}
+  [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn].forEach(el=>{
     if (!el) return;
-    let suppressClickUntil = 0;
+    try { el.style.touchAction = 'manipulation'; } catch {}
+  });
 
-    el.addEventListener('pointerdown', (e) => {
-      // only primary pointer
-      if (e.button != null && e.button !== 0) return;
-      suppressClickUntil = performance.now() + 350;
-      handler(e);
-    }, { passive: true });
-
-    el.addEventListener('click', (e) => {
-      if (performance.now() < suppressClickUntil) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      handler(e);
-    });
-  }
-
-  // ===== Utility: groups & resets =====
-  function getOriginalRandomContainer() {
-    const all = Array.from(document.querySelectorAll('.random-container'));
-    if (!all.length) return null;
-    if (!tempoStepContainer) return all[0];
-    const found = all.find(el => el !== tempoStepContainer);
-    return found || all[0];
-  }
-
-  function lockRandomGroup(locked) {
-    const rc = getOriginalRandomContainer();
-    const al = rc?.querySelector('.auto-label');
-    if (locked) {
-      if (randomTempoBtn)        randomTempoBtn.disabled = true;
-      if (autoRandomizeToggle)   autoRandomizeToggle.disabled = true;
-      if (repsPerTempoInput)     repsPerTempoInput.disabled = true;
-      if (minTempoInput)         minTempoInput.disabled = true;
-      if (maxTempoInput)         maxTempoInput.disabled = true;
-      rc?.classList.add('disabled'); al?.classList.add('disabled');
-    } else if (!isPlayingPlaylist) {
-      if (randomTempoBtn)        randomTempoBtn.disabled = false;
-      if (autoRandomizeToggle)   autoRandomizeToggle.disabled = false;
-      if (repsPerTempoInput)     repsPerTempoInput.disabled = false;
-      if (minTempoInput)         minTempoInput.disabled = false;
-      if (maxTempoInput)         maxTempoInput.disabled = false;
-      rc?.classList.remove('disabled'); al?.classList.remove('disabled');
+  /* ---------------- Pressed visuals + smoother transitions ---------------- */
+  const uiStyle = document.createElement('style');
+  uiStyle.textContent = `
+    .btn.is-pressing { filter: brightness(.92); transform: translateY(1px); }
+    .btn--orange.is-pressing{ background: var(--orange-d); }
+    .btn--purple.is-pressing{ background: var(--purple-d); }
+    .selector.is-pressing, .picker__close.is-pressing { filter: brightness(.94); }
+    /* Smoother color transitions for main metro lights on iOS */
+    .metro-light{
+      will-change: background-color, border-color, box-shadow, transform;
+      transition: background-color 120ms linear, border-color 120ms linear, box-shadow 120ms linear;
+      backface-visibility: hidden;
+      transform: translateZ(0);
+      -webkit-tap-highlight-color: transparent;
     }
-  }
+    .metro-light.is-hit { transition: none; }
+    .main-row, .sub-row { display: grid; gap: var(--light-gap, 10px); }
+  `;
+  document.head.appendChild(uiStyle);
 
-  function lockTempoStepGroup(locked) {
-    if (!tempoStepContainer) return;
-    const al = tempoStepContainer.querySelector('.auto-label');
-    if (locked) {
-      if (bumpTempoBtn)          bumpTempoBtn.disabled = true;
-      if (autoTempoStepToggle)   autoTempoStepToggle.disabled = true;
-      if (dialRepsInput)         dialRepsInput.disabled = true;
-      if (dialStepInput)         dialStepInput.disabled = true;
-      tempoStepContainer.classList.add('disabled'); al?.classList.add('disabled');
-    } else if (!isPlayingPlaylist) {
-      if (bumpTempoBtn)          bumpTempoBtn.disabled = false;
-      if (autoTempoStepToggle)   autoTempoStepToggle.disabled = false;
-      if (dialRepsInput)         dialRepsInput.disabled = false; // editable outside playlist
-      if (dialStepInput)         dialStepInput.disabled = false; // editable outside playlist
-      tempoStepContainer.classList.remove('disabled'); al?.classList.remove('disabled');
-    }
-  }
-
-  function resetTempoStepCounter() { tempoStepRepCounter = 0; }
-
-  function resetRandomizeInternals() {
-    isRandomizeEnabled = false;
-    repsBeforeChange   = 1;
-    currentRepCount    = 0;
-  }
-
-  function resetTempoStepInternals() {
-    tempoStepEnabled    = false;
-    tempoStepReps       = 1;
-    tempoStepStep       = 0;
-    tempoStepRepCounter = 0;
-  }
-
-  function applyLoopMode() {
-    if (!audio) return;
-    audio.loop = !isPlayingPlaylist && !isRandomizeEnabled && !tempoStepEnabled;
-  }
-
-  // ===== Total time accuracy: update on metadata & rate changes =====
-  function refreshTimeDisplays() {
-    updateTotalTime();
-    updateCurrentTime();
-  }
-  if (audio) {
-    audio.addEventListener('loadedmetadata', refreshTimeDisplays);
-    audio.addEventListener('durationchange', refreshTimeDisplays);
-    audio.addEventListener('ratechange',     refreshTimeDisplays);
-    audio.addEventListener('loadeddata',     refreshTimeDisplays);
-    audio.addEventListener('canplay',        refreshTimeDisplays);
-  }
-
-  // ===== First-load reset =====
-  function resetPracticeControls() {
-    if (autoRandomizeToggle) autoRandomizeToggle.checked = false;
-    if (repsPerTempoInput)   repsPerTempoInput.value = '';
-    if (minTempoInput)       minTempoInput.value = '';
-    if (maxTempoInput)       maxTempoInput.value = '';
-    resetRandomizeInternals();
-
-    if (autoTempoStepToggle) autoTempoStepToggle.checked = false;
-    if (dialRepsInput) { dialRepsInput.value = ''; dialRepsInput.disabled = false; } // keep enabled on load
-    if (dialStepInput) { dialStepInput.value = ''; dialStepInput.disabled = false; } // keep enabled on load
-    if (bumpTempoBtn)  { bumpTempoBtn.disabled = false; }
-    resetTempoStepInternals();
-
-    applyLoopMode();
-  }
-  resetPracticeControls();
-  window.addEventListener('pageshow', (e) => { if (e.persisted) resetPracticeControls(); });
-
-  // Make buttons "real buttons" and stop event leaks
-  [
-    'playPauseBtn','randomExerciseBtn','randomTempoBtn',
-    'prevExerciseBtn','nextExerciseBtn',
-    'prevPlaylistItemBtn','nextPlaylistItemBtn','stopPlaylistBtn',
-    'bumpTempoBtn'
-  ].forEach(id => {
-    const el = document.getElementById(id);
+  function wirePressedVisual(el){
     if (!el) return;
-    try { el.type = 'button'; } catch {}
-    el.style.touchAction = 'manipulation';
-    const stop = (e) => e.stopPropagation();
-    el.addEventListener('pointerdown', stop, { passive: true });
-    el.addEventListener('click', stop);
-  });
-
-  // never let readOnly selector inputs keep a caret/focus
-  [categorySearchInput, exerciseSearchInput, playlistSearchInput, playlistQueueSearchInput].forEach(inp=>{
-    if(!inp) return;
-    try { inp.readOnly = true; } catch {}
-    inp.setAttribute('inputmode','none');
-    inp.addEventListener('focus', () => { if (inp.readOnly) inp.blur(); }, true);
-  });
-
-  // Initial UI setup
-  initializeCategoryPlaceholder();
-  initializePlaylistPlaceholder();
-
-  displayedExercises = filterExercisesForMode();
-  if (displayedExercises.length > 0) {
-    currentExerciseIndex    = 0;
-    currentSelectedExercise = displayedExercises[currentExerciseIndex];
-    initializeExercise(currentSelectedExercise);
-    if (exerciseSearchInput) exerciseSearchInput.placeholder = currentSelectedExercise.name;
-  } else {
-    if (exerciseSearchInput) exerciseSearchInput.placeholder = "Search Exercises...";
+    const add = ()=> el.classList.add('is-pressing');
+    const rm  = ()=> el.classList.remove('is-pressing');
+    el.addEventListener('pointerdown', add, { passive:true });
+    el.addEventListener('pointerup',   rm,  { passive:true });
+    el.addEventListener('pointercancel', rm, { passive:true });
+    el.addEventListener('pointerleave', rm, { passive:true });
+    el.addEventListener('touchstart',  add, { passive:true });
+    el.addEventListener('touchend',    rm,  { passive:true });
+    el.addEventListener('touchcancel', rm,  { passive:true });
+    el.addEventListener('click',       rm);
   }
+  [playBtn, tapBtn, bpmDec1Btn, bpmDec5Btn, bpmInc1Btn, bpmInc5Btn,
+   tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(wirePressedVisual);
 
-  // Disable queue & playlist controls initially
-  if (playlistQueueSearchInput) playlistQueueSearchInput.disabled = true;
-  if (stopPlaylistBtn)          stopPlaylistBtn.disabled          = true;
-  if (prevPlaylistItemBtn)      prevPlaylistItemBtn.disabled      = true;
-  if (nextPlaylistItemBtn)      nextPlaylistItemBtn.disabled      = true;
+  // Enable :active-like behavior on iOS
+  document.addEventListener('touchstart', function(){}, { passive:true });
 
-  // ===== Randomize toggles =====
-  if (autoRandomizeToggle) {
-    autoRandomizeToggle.addEventListener('change', function () {
-      isRandomizeEnabled = this.checked;
-      currentRepCount = 0;
+  /* ================= iOS slider fix (thumb-only) ================= */
+  const IS_IOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes('Mac') && 'ontouchend' in document);
+  if (IS_IOS) document.documentElement.classList.add('is-ios');
 
-      // Mutual exclusivity: turning Randomize Auto ON turns off Tempo Step Auto
-      if (isRandomizeEnabled) {
-        if (autoTempoStepToggle) autoTempoStepToggle.checked = false;
-        tempoStepEnabled = false;
-        // DO NOT disable/darken the tempo step controls here.
-      }
-
-      applyLoopMode();
-      if (isRandomizeEnabled) defocusSlider();
-    });
-  }
-  if (repsPerTempoInput) {
-    repsPerTempoInput.addEventListener('input', function () {
-      const val = parseInt(this.value, 10);
-      repsBeforeChange = (!isNaN(val) && val > 0) ? val : 1;
-    });
-  }
-
-  // ===== Tempo Step (Dial) wiring =====
-  if (autoTempoStepToggle) {
-    autoTempoStepToggle.addEventListener('change', function () {
-      tempoStepEnabled = this.checked;
-      resetTempoStepCounter();
-
-      // Do not disable or darken randomize controls outside playlist.
-      if (tempoStepEnabled) {
-        // Just turn off Randomize Auto internally.
-        if (autoRandomizeToggle) autoRandomizeToggle.checked = false;
-        isRandomizeEnabled = false;
-      }
-
-      applyLoopMode();
-    });
-  }
-
-  if (dialRepsInput) {
-    dialRepsInput.addEventListener('input', () => {
-      const v = parseInt(dialRepsInput.value, 10);
-      tempoStepReps = (!isNaN(v) && v > 0) ? v : 1;
-    });
-  }
-  if (dialStepInput) {
-    // allow one leading "-" and digits; clamp to [-999, 999]
-    dialStepInput.addEventListener('input', () => {
-      let s = dialStepInput.value || '';
-      s = s.replace(/[^\d-]/g, '');        // strip non-digits/non-minus
-      s = s.replace(/(?!^)-/g, '');        // only one minus, and only at start
-      if (s === '-' || s === '') {         // user mid-typing
-        tempoStepStep = 0;
-        dialStepInput.setCustomValidity('');
-        return;
-      }
-      let v = parseInt(s, 10);
-      if (isNaN(v)) v = 0;
-      if (v > 999) v = 999;
-      if (v < -999) v = -999;
-      dialStepInput.value = String(v);
-      tempoStepStep = v;
-      dialStepInput.setCustomValidity('');
-    });
-
-    // keep "-" only at position 0 during typing
-    dialStepInput.addEventListener('beforeinput', (e) => {
-      if (e.inputType === 'insertText' && e.data === '-') {
-        const pos = dialStepInput.selectionStart ?? 0;
-        if (pos !== 0) e.preventDefault();
-      }
-    });
-  }
-
-  // ===== Buttons =====
-  randomExerciseBtn?.addEventListener('click', function () {
-    quietRandomize();
-    if (isPlayingPlaylist) stopPlaylist();
-    pickRandomExercise();
-  });
-
-  // >>> FAST, IMMEDIATE: Randomize Tempo (user press)
-  addFastPress(randomTempoBtn, function () {
-    if (isPlayingPlaylist) return;
-    const wasPlaying = audio && !audio.paused;
-    quietRandomize();
-    pickRandomTempo(true);        // immediate, skip throttle on manual press
-    resetTempoStepCounter();
-    if (wasPlaying) startProgressTicker();
-  });
-
-  // >>> FAST, IMMEDIATE: Bump Tempo (user press)
-  addFastPress(bumpTempoBtn, function () {
-    if (isPlayingPlaylist) return;
-    if (!tempoSlider) return;
-    const cur  = parseInt(tempoSlider.value, 10);
-    const min  = parseInt(tempoSlider.min, 10);
-    const max  = parseInt(tempoSlider.max, 10);
-    const step = (typeof tempoStepStep === 'number') ? tempoStepStep : 0;
-    const next = Math.max(min, Math.min(max, cur + step));
-    setTempoSilently(next, { blur:true });  // immediate
-    resetTempoStepCounter();
-  });
-
-  if (playPauseBtn && audio) {
-    playPauseBtn.addEventListener('click', function () {
-      if (audio.ended || (isFinite(audio.duration) && audio.currentTime >= audio.duration)) {
-        audio.currentTime = 0;
-        resetProgressBarInstant();
-      }
-      if (audio.paused) {
-        if (audio.readyState < 3) audio.load();
-        audio.play().then(() => {
-          this.textContent = 'Pause';
-          startProgressTicker();
-        }).catch((error) => {
-          console.error('Error playing audio:', error, {
-            src: audio.currentSrc || audio.src,
-            readyState: audio.readyState
-          });
-          alert('Audio is not ready yet. Please wait a moment.');
-        });
-      } else {
-        quietRandomize();
-        audio.pause();
-        this.textContent = 'Play';
-      }
-    });
-  }
-
-  // ===== Audio ended (single exercise / auto modes) =====
-  let autoStepLock = false;
-  let playbackCycleId = 0;
-  const onEnded = async () => {
-    stopProgressTicker();
-    if (isPlayingPlaylist) return;
-    if (autoStepLock) return;
-    autoStepLock = true;
-    const cycleId = ++playbackCycleId;
-
-    try {
-      // Randomize Auto path
-      if (isRandomizeEnabled && currentSelectedExercise) {
-        currentRepCount++;
-        if (currentRepCount >= repsBeforeChange) {
-          currentRepCount = 0;
-          pickRandomTempo();  // auto path stays throttled
-        }
-
-        resetProgressBarInstant();
-        audio.currentTime = 0;
-        await new Promise(r => requestAnimationFrame(r));
-        if (cycleId !== playbackCycleId) return;
-        try { await audio.play(); } catch {}
-        if (playPauseBtn) playPauseBtn.textContent = 'Pause';
-        startProgressTicker();
-        return;
-      }
-
-      // Tempo Step Auto path (mutually exclusive)
-      if (tempoStepEnabled && currentSelectedExercise) {
-        tempoStepRepCounter++;
-        if (tempoStepReps <= 0) tempoStepReps = 1;
-        if (tempoStepRepCounter % tempoStepReps === 0) {
-          const cur = parseInt(tempoSlider.value, 10);
-          const min = parseInt(tempoSlider.min, 10);
-          const max = parseInt(tempoSlider.max, 10);
-          const step = (typeof tempoStepStep === 'number') ? tempoStepStep : 0;
-          const next = Math.max(min, Math.min(max, cur + step));
-          setTempoThrottled(next, { blur:true });
-          tempoStepRepCounter = 0;
-        }
-
-        resetProgressBarInstant();
-        audio.currentTime = 0;
-        await new Promise(r => requestAnimationFrame(r));
-        if (cycleId !== playbackCycleId) return;
-        try { await audio.play(); } catch {}
-        if (playPauseBtn) playPauseBtn.textContent = 'Pause';
-        startProgressTicker();
-        return;
-      }
-
-      // No auto modes
-      if (!audio.loop) {
-        if (playPauseBtn) playPauseBtn.textContent = 'Play';
-        resetProgressBarInstant();
-      }
-    } finally {
-      setTimeout(() => { if (cycleId === playbackCycleId) autoStepLock = false; }, 400);
-    }
-  };
-  audio.addEventListener('ended', onEnded);
-
-  // ===== Tempo slider guards (iOS-friendly) =====
-  function defocusSlider() {
-    if (tempoSlider && document.activeElement === tempoSlider) tempoSlider.blur();
-    userIsAdjustingTempo = false;
-  }
-  document.addEventListener('pointerdown', (e) => {
-    if (e.target !== tempoSlider) defocusSlider();
-  }, { capture: true, passive: true });
-
-  // iOS tap shield (unchanged)
-  (function () {
-    const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    if (!isiOS || !tempoSlider) return;
-
+  function installThumbOnlySlider(rangeEl){
+    if (!rangeEl) return;
     const wrap = document.createElement('div');
+    wrap.className = 'slider-wrap';
     wrap.style.position = 'relative';
     wrap.style.display  = 'block';
     wrap.style.width    = '100%';
-    tempoSlider.parentNode.insertBefore(wrap, tempoSlider);
-    wrap.appendChild(tempoSlider);
+    rangeEl.parentNode.insertBefore(wrap, rangeEl);
+    wrap.appendChild(rangeEl);
 
     const shield = document.createElement('div');
     Object.assign(shield.style, {
-      position: 'absolute', inset: '0', background: 'transparent', zIndex: '5', touchAction: 'none'
+      position: 'absolute', inset: '0',
+      background: 'transparent', zIndex: '5', touchAction: 'none'
     });
     wrap.appendChild(shield);
 
     const THUMB_RADIUS = 24;
-    let dragging = false;
 
     function thumbCenterX() {
-      const rect = tempoSlider.getBoundingClientRect();
-      const min  = Number(tempoSlider.min) || 0;
-      const max  = Number(tempoSlider.max) || 100;
-      const v    = Number(tempoSlider.value);
+      const rect = rangeEl.getBoundingClientRect();
+      const min  = Number(rangeEl.min) || 0;
+      const max  = Number(rangeEl.max) || 100;
+      const v    = Number(rangeEl.value) || 0;
       const pct  = (v - min) / (max - min || 1);
       return rect.left + pct * rect.width;
     }
-
     function setFromClientX(clientX) {
-      const rect = tempoSlider.getBoundingClientRect();
-      const x    = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-      const min  = Number(tempoSlider.min) || 0;
-      const max  = Number(tempoSlider.max) || 100;
+      const rect = rangeEl.getBoundingClientRect();
+      const x    = Math.min(Math.max(clientX - rect.left, 0), rect.width || 1);
+      const min  = Number(rangeEl.min) || 0;
+      const max  = Number(rangeEl.max) || 100;
       const val  = Math.round(min + (x / (rect.width || 1)) * (max - min));
-      tempoSlider.value = String(val);
-      updatePlaybackRate();
-      updateSliderBackground(tempoSlider, '#96318d', '#ffffff');
-      resetTempoStepCounter();
+      rangeEl.value = String(val);
+      rangeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function defocusSlider() {
+      if (document.activeElement === rangeEl) rangeEl.blur();
     }
 
+    document.addEventListener(
+      'pointerdown',
+      (e) => { if (e.target !== rangeEl) defocusSlider(); },
+      { capture: true, passive: true }
+    );
+
+    let dragging = false;
     function start(e) {
       const t = e.touches ? e.touches[0] : e;
       const onThumb = Math.abs(t.clientX - thumbCenterX()) <= THUMB_RADIUS;
@@ -558,1375 +157,1104 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       dragging = true;
-      userIsAdjustingTempo = true;
       e.preventDefault();
       e.stopPropagation();
-      try { tempoSlider.focus({ preventScroll: true }); } catch {}
+      try { rangeEl.focus({ preventScroll:true }); } catch {}
+
       move(e);
 
-      window.addEventListener('pointermove', move, { passive: false });
-      window.addEventListener('pointerup',   end,  { passive: true, once: true });
-      window.addEventListener('pointercancel', end, { passive: true, once: true });
-      window.addEventListener('touchmove',   move, { passive: false });
-      window.addEventListener('touchend',    end,  { passive: true, once: true });
-      window.addEventListener('touchcancel', end,  { passive: true, once: true });
+      window.addEventListener('pointermove', move, { passive:false });
+      window.addEventListener('pointerup',   end,  { passive:true, once:true });
+      window.addEventListener('pointercancel', end,{ passive:true, once:true });
+      window.addEventListener('touchmove',   move, { passive:false });
+      window.addEventListener('touchend',    end,  { passive:true, once:true });
+      window.addEventListener('touchcancel', end,  { passive:true, once:true });
     }
-
     function move(e) {
       if (!dragging) return;
       const t = e.touches ? e.touches[0] : e;
       setFromClientX(t.clientX);
       e.preventDefault();
     }
-
     function end() {
       if (!dragging) return;
       dragging = false;
-      userIsAdjustingTempo = false;
       defocusSlider();
       window.removeEventListener('pointermove', move);
       window.removeEventListener('touchmove',   move);
     }
 
-    shield.addEventListener('pointerdown', start, { passive: false });
-    shield.addEventListener('touchstart',  start, { passive: false });
-  })();
-
-  // Pointer fallback (mouse / stylus)
-  if (tempoSlider) {
-    tempoSlider.addEventListener('pointerdown', (e) => {
-      if (e.pointerType !== 'touch') userIsAdjustingTempo = true;
-    }, { passive: true });
-
-    const endTempoDrag = () => { userIsAdjustingTempo = false; };
-    tempoSlider.addEventListener('pointerup', endTempoDrag, { passive: true });
-    tempoSlider.addEventListener('pointercancel', endTempoDrag, { passive: true });
-
-    tempoSlider.addEventListener('input', function () {
-      if (suppressTempoInput) return;
-      resetTempoStepCounter();
-      updatePlaybackRate();
-      updateSliderBackground(this, '#96318d', '#ffffff');
-    });
-
-    tempoSlider.addEventListener('change', defocusSlider);
-  }
-
-  // ===== Progress bar (track) =====
-  let progressRafId = null;
-  if (progress) {
-    progress.style.transformOrigin = 'left center';
-    progress.style.transform = 'scaleX(0)';
-  }
-  function resetProgressBarInstant() {
-    if (!progress) return;
-    progress.style.transform = 'scaleX(0)';
-    void progress.offsetWidth;
-    if (currentTimeDisplay) currentTimeDisplay.textContent = '0:00';
-  }
-
-  // ======= Playlist cumulative time helpers =======
-  function computePlaylistTimes() {
-    // Returns { elapsed, total } in seconds, tempo-adjusted across the entire queue.
-    if (!isPlayingPlaylist || !currentPlaylist || playlistQueueMap.length === 0) {
-      const rate = audio?.playbackRate || 1;
-      const elapsed = (audio?.currentTime || 0) / rate;
-      const total   = (isFinite(audio?.duration) && audio.duration > 0) ? (audio.duration / rate) : 0;
-      return { elapsed, total };
-    }
-
-    const curIdx = Math.max(0, getCurrentPlaylistQueueIndex());
-    let total = 0;
-    let elapsed = 0;
-
-    for (let i = 0; i < playlistQueueMap.length; i++) {
-      const pos = playlistQueueMap[i];
-      const pItem = currentPlaylist.items[pos.playlistItemIndex];
-      const ex = exById.get(pItem.exerciseId);
-      if (!ex) continue;
-
-      const dur1x = durationCache.get(ex.id);
-      const tempo = pItem.tempos[pos.tempoIndex];
-      if (!dur1x || !tempo || !ex.originalTempo) continue;
-
-      const rate = tempo / ex.originalTempo;
-      const playSeconds = dur1x / (rate || 1);
-
-      total += playSeconds;
-      if (i < curIdx) elapsed += playSeconds;
-    }
-
-    // Add partial progress of current item (at its current playbackRate)
-    const rateNow = audio?.playbackRate || 1;
-    const curElapsed = (audio?.currentTime || 0) / rateNow;
-    if (isFinite(curElapsed)) elapsed += curElapsed;
-
-    return { elapsed, total };
-  }
-
-  function fmtMMSS(s) {
-    const m = Math.floor((s || 0) / 60);
-    const sec = Math.max(0, Math.floor((s || 0) % 60)).toString().padStart(2, '0');
-    return `${m}:${sec}`;
-  }
-
-  // Render playlist overlay text (time or percent)
-  function renderPlaylistOverlay() {
-    if (!playlistProgressPercentage) return;
-
-    if (playlistOverlayMode === 'percent') {
-      if (!isPlayingPlaylist || !currentPlaylist || playlistQueueMap.length === 0) {
-        playlistProgressPercentage.textContent = '0%';
-        return;
-      }
-      const idx = getCurrentPlaylistQueueIndex();
-      const total = playlistQueueMap.length;
-      const pct = (idx >= 0 && total > 0) ? ((idx + 1) / total) * 100 : 0;
-      playlistProgressPercentage.textContent = Math.floor(pct) + '%';
-      return;
-    }
-
-    // TIME mode (cumulative across playlist, tempo-adjusted)
-    const { elapsed, total } = computePlaylistTimes();
-    playlistProgressPercentage.textContent = `${fmtMMSS(elapsed)} / ${fmtMMSS(total)}`;
-  }
-
-  function startProgressTicker() {
-    if (!audio || !progress) return;
-    cancelAnimationFrame(progressRafId);
-    const tick = () => {
-      if (!audio || !progress) return;
-      const dur = (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 1;
-      const pct = Math.min(1, Math.max(0, (audio.currentTime || 0) / dur));
-      progress.style.transform = `scaleX(${pct})`;
-      updateCurrentTime();
-
-      // Keep playlist overlay fresh (esp. for cumulative time)
-      renderPlaylistOverlay();
-
-      if (!audio.paused && !audio.ended) {
-        progressRafId = requestAnimationFrame(tick);
-      }
-    };
-    progressRafId = requestAnimationFrame(tick);
-  }
-  function stopProgressTicker() {
-    cancelAnimationFrame(progressRafId);
-    progressRafId = null;
-  }
-
-  if (progressContainer) {
-    progressContainer.addEventListener('pointerdown', (e) => {
-      isDragging = true;
-      try { progressContainer.setPointerCapture(e.pointerId); } catch {}
-      updateProgress(e);
-      defocusSlider();
-    });
-    progressContainer.addEventListener('pointermove', (e) => {
-      if (!isDragging) return;
-      updateProgress(e);
-    });
-    const endProgressDrag = (e) => {
-      isDragging = false;
-      try { progressContainer.releasePointerCapture(e.pointerId); } catch {}
-    };
-    progressContainer.addEventListener('pointerup', endProgressDrag, { passive: true });
-    progressContainer.addEventListener('pointercancel', endProgressDrag, { passive: true });
-    window.addEventListener('pointerup',   () => { isDragging = false; }, { passive: true });
-    document.addEventListener('visibilitychange', () => { if (document.hidden) isDragging = false; });
-  }
-
-  function updateProgress(e) {
-    if (!audio || !progressContainer || !progress) return;
-    const rect = progressContainer.getBoundingClientRect();
-    const clientX = (e.clientX != null) ? e.clientX : (e.touches?.[0]?.clientX ?? 0);
-    let x = clientX - rect.left;
-    const width = rect.width || 1;
-    let clickedValue = Math.min(1, Math.max(0, x / width));
-    const dur = (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : 1;
-    audio.currentTime = clickedValue * dur;
-    const pct = Math.min(1, Math.max(0, (audio.currentTime || 0) / dur));
-    progress.style.transform = `scaleX(${pct})`;
-    updateCurrentTime();
-  }
-
-  // ===== Helpers =====
-  function formatTime(t) {
-    const minutes = Math.floor(t / 60);
-    const seconds = Math.floor(t % 60).toString().padStart(2, '0');
-    return `${minutes}:${seconds}`;
-  }
-
-  function updateTotalTime() {
-    if (!audio || !totalTimeDisplay) return;
-    if (!isFinite(audio.duration) || audio.duration <= 0) return;
-    const duration = audio.duration / (audio.playbackRate || 1);
-    totalTimeDisplay.textContent = formatTime(duration);
-  }
-
-  function updateCurrentTime() {
-    if (!audio || !currentTimeDisplay) return;
-    const rate = audio.playbackRate || 1;
-    const current = (audio.currentTime || 0) / rate;
-    currentTimeDisplay.textContent = formatTime(current);
-  }
-
-  function updateSliderBackground(slider, c1, c2) {
-    if (!slider) return;
-    const v = Number(slider.value), min = Number(slider.min), max = Number(slider.max);
-    const pct = ((v - min) / (max - min)) * 100;
-    slider.style.background = `linear-gradient(to right, ${c1} 0%, ${c1} ${pct}%, ${c2} ${pct}%, ${c2} 100%)`;
-  }
-
-  function updatePlaybackRate() {
-    if (!audio || !tempoSlider || !currentOriginalTempo) return;
-    const currentTempo = parseInt(tempoSlider.value, 10);
-    const playbackRate = currentTempo / currentOriginalTempo;
-
-    // Force "Preserve Pitch" to avoid the deep/low demon sound
-    if ('preservesPitch' in audio)       audio.preservesPitch = true;
-    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
-    if ('mozPreservesPitch' in audio)    audio.mozPreservesPitch = true;
-
-    audio.playbackRate = playbackRate;
-    if (tempoLabel) tempoLabel.textContent = 'BPM: ' + currentTempo;
-    updateTotalTime();
-    updateCurrentTime();
-  }
-
-  function setTempoThrottled(bpm, { blur = false } = {}) {
-    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    if (now - lastTempoChangeAt < 400) return;
-    lastTempoChangeAt = now;
-    setTempoSilently(bpm, { blur });
-  }
-
-  function setTempoSilently(bpm, { blur = false } = {}) {
-    if (!tempoSlider) return;
-    suppressTempoInput = true;
-    tempoSlider.value = String(bpm);
-    updatePlaybackRate();
-    updateSliderBackground(tempoSlider, '#96318d', '#ffffff');
-    requestAnimationFrame(() => {
-      suppressTempoInput = false;
-      if (blur) tempoSlider.blur();
-    });
-  }
-
-  // Resolve media/image URLs robustly across local, GitHub Pages, and Webflow.
-  function resolveAssetUrl(p) {
-    if (!p) return p;
-
-    // Upgrade to https if page is https (avoid mixed content)
-    if (location.protocol === 'https:' && /^http:\/\//i.test(p)) {
-      p = p.replace(/^http:\/\//i, 'https://');
-    }
-
-    // Already absolute (https or data URL)? Use as-is.
-    if (/^(https?:)?\/\//i.test(p) || /^data:/i.test(p)) return p;
-
-    // Root-absolute like "/audio/foo.mp3" -> this breaks on GitHub project sites.
-    if (p.startsWith('/')) {
-      const parts = location.pathname.split('/').filter(Boolean);
-      // On username.github.io/repo/... prefix the repo name: "/repo"
-      if (/github\.io$/i.test(location.hostname) && parts.length >= 1) {
-        return '/' + parts[0] + p; // "/repo" + "/audio/foo.mp3"
-      }
-      // Otherwise leave it root-absolute (works for custom domains/Webflow roots)
-      return p;
-    }
-
-    // Relative -> resolve against current page
-    try {
-      return new URL(p, document.baseURI).href;
-    } catch {
-      return p;
-    }
-  }
-
-  // ===== Exercise flow =====
-  function filterExercisesForMode() {
-    if (isPlayingPlaylist && currentPlaylist) {
-      const ids = currentPlaylist.items.map(i => i.exerciseId);
-      return exercises.filter(ex => ids.includes(ex.id));
-    } else {
-      const selectedCategory = getSelectedCategory();
-      return exercises.filter(ex => selectedCategory === 'all' || ex.category.includes(selectedCategory));
-    }
-  }
-
-  function getSelectedCategory() {
-    const id = getSelectorId(categorySearchInput);
-    if (id) return id;
-    const ph = categorySearchInput?.placeholder ?? 'All Categories';
-    if (ph === '' || ph === 'All Categories') return 'all';
-    const entry = Object.entries(categoryDisplayMap).find(([key, val]) => val.toLowerCase() === ph.toLowerCase());
-    return entry ? entry[0] : 'all';
-  }
-
-  function initializeExercise(ex) {
-    if (!audio || !tempoSlider || !tempoLabel || !sheetMusicImg) return;
-
-    // --- FIX 2: Prevent redundant audio reloading ---
-    const newSrc = resolveAssetUrl(ex.audioSrc);
-    // Create a temporary anchor to resolve the absolute URL for comparison
-    const tempAnchor = document.createElement('a');
-    tempAnchor.href = newSrc;
-    
-    // Only reload if the source is actually different
-    if (audio.src !== tempAnchor.href) {
-      audio.src = newSrc;
-      audio.preload = 'auto';
-      audio.load();
-
-      const onceUpdate = () => refreshTimeDisplays();
-      audio.addEventListener('loadedmetadata', onceUpdate, { once: true });
-      audio.addEventListener('canplay',        onceUpdate, { once: true });
-      
-      const cacheDurationOnce = () => {
-        if (isFinite(audio.duration) && audio.duration > 0) {
-          durationCache.set(ex.id, audio.duration);
-          renderPlaylistOverlay();
-        }
-      };
-      audio.addEventListener('loadedmetadata', cacheDurationOnce, { once: true });
-    }
-
-    sheetMusicImg.src = resolveAssetUrl(ex.sheetMusicSrc);
-
-    currentOriginalTempo = ex.originalTempo;
-
-    // --- REVERTED LOGIC: /2 and x2 ---
-    tempoSlider.min = Math.floor(ex.originalTempo / 2);
-    tempoSlider.max = Math.floor(ex.originalTempo * 2);
-    
-    // Set visual value
-    tempoSlider.value = ex.originalTempo;
-    tempoLabel.textContent = 'BPM: ' + ex.originalTempo;
-
-    if (exerciseSearchInput) {
-      exerciseSearchInput.value = '';
-      exerciseSearchInput.placeholder = ex.name;
-      exerciseSearchInput.dataset.id = String(ex.id);
-    }
-
-    updatePlaybackRate();
-    updateSliderBackground(tempoSlider, '#96318d', '#ffffff');
-    resetTempoStepCounter();
-    applyLoopMode();
-  }
-
-
-  // ===== Robust Random Tempo (now supports immediate flag) =====
-  function pickRandomTempo(immediate = false) {
-    if (!currentSelectedExercise || !tempoSlider) return;
-    if (userIsAdjustingTempo) return;
-
-    const setNow = (val) => immediate ? setTempoSilently(val, { blur: true }) : setTempoThrottled(val, { blur: true });
-
-    const sliderMin = Number(tempoSlider.min);
-    const sliderMax = Number(tempoSlider.max);
-
-    const minRaw = parseInt(minTempoInput?.value, 10);
-    const maxRaw = parseInt(maxTempoInput?.value, 10);
-
-    const hasMin = !isNaN(minRaw);
-    const hasMax = !isNaN(maxRaw);
-
-    // If both provided and reversed -> do nothing
-    if (hasMin && hasMax && minRaw > maxRaw) {
-      return; // leave tempo unchanged
-    }
-
-    // Below-range or above-range hard clamps (no random pick)
-    if (hasMin && hasMax && maxRaw < sliderMin) {
-      setNow(sliderMin);
-      prevTempo = sliderMin;
-      return;
-    }
-    if (hasMin && hasMax && minRaw > sliderMax) {
-      setNow(sliderMax);
-      prevTempo = sliderMax;
-      return;
-    }
-
-    // Defaults based on exercise if empty/invalid
-    const defMin = Math.floor(currentSelectedExercise.originalTempo / 2);
-    const defMax = currentSelectedExercise.originalTempo * 2;
-
-    let minTempo = hasMin ? minRaw : defMin;
-    let maxTempo = hasMax ? maxRaw : defMax;
-
-    // Clamp to slider range
-    minTempo = Math.max(sliderMin, Math.min(sliderMax, minTempo));
-    maxTempo = Math.max(sliderMin, Math.min(sliderMax, maxTempo));
-
-    // After clamp, if invalid ordering (e.g., only one was far out), treat as no-op
-    if (minTempo > maxTempo) {
-      return;
-    }
-
-    // If min==max -> direct set (and avoid "distance-from-prev" loop)
-    if (minTempo === maxTempo) {
-      setNow(minTempo);
-      prevTempo = minTempo;
-      return;
-    }
-
-    // Random within [minTempo, maxTempo]
-    const span = maxTempo - minTempo;
-    let randomTempo;
-
-    // Avoid infinite loops when span is small: relax distance constraints
-    const needDistance = prevTempo != null && span >= 8;
-    if (!needDistance) {
-      randomTempo = Math.floor(Math.random() * (span + 1)) + minTempo;
-    } else {
-      const MAX_TRIES = 25;
-      let found = false;
-      for (let i = 0; i < MAX_TRIES; i++) {
-        const cand = Math.floor(Math.random() * (span + 1)) + minTempo;
-        const delta = Math.abs(cand - prevTempo);
-        if (delta >= 8 && delta <= 90) { randomTempo = cand; found = true; break; }
-      }
-      if (!found) {
-        randomTempo = Math.floor(Math.random() * (span + 1)) + minTempo;
-      }
-    }
-
-    prevTempo = randomTempo;
-    setNow(randomTempo);
-  }
-
-  function pickRandomExercise() {
-    const filtered = filterExercisesForMode();
-    if (filtered.length === 0) return;
-    const idx = Math.floor(Math.random() * filtered.length);
-    currentExerciseIndex    = idx;
-    currentSelectedExercise = filtered[idx];
-    if (exerciseSearchInput) {
-      exerciseSearchInput.value = '';
-      exerciseSearchInput.placeholder = currentSelectedExercise.name;
-      exerciseSearchInput.dataset.id = String(currentSelectedExercise.id);
-    }
-    initializeExercise(currentSelectedExercise);
-    if (audio) { audio.pause(); resetProgressBarInstant(); }
-    if (playPauseBtn) playPauseBtn.textContent = 'Play';
-
-    if (isPlayingPlaylist && currentPlaylist) {
-      syncPlaylistIndexToExercise(currentSelectedExercise.id);
-      playCurrentPlaylistItem();
-    }
-  }
-
-  function navigateExercise(step) {
-    displayedExercises = filterExercisesForMode();
-    if (displayedExercises.length === 0) return;
-
-    const len = displayedExercises.length;
-    currentExerciseIndex = (currentExerciseIndex + step + len) % len;
-    currentSelectedExercise = displayedExercises[currentExerciseIndex];
-
-    if (exerciseSearchInput) {
-      exerciseSearchInput.value = '';
-      exerciseSearchInput.placeholder = currentSelectedExercise.name;
-      exerciseSearchInput.dataset.id = String(currentSelectedExercise.id);
-    }
-
-    initializeExercise(currentSelectedExercise);
-    if (audio) { audio.pause(); resetProgressBarInstant(); if (playPauseBtn) playPauseBtn.textContent = 'Play'; }
-
-    if (isPlayingPlaylist && currentPlaylist) {
-      syncPlaylistIndexToExercise(currentSelectedExercise.id);
-      updatePlaylistQueueDisplay();
-      updatePlaylistProgressBar();
-      playCurrentPlaylistItem();
-    }
-  }
-
-  // Exercise nav buttons
-  document.getElementById('prevExerciseBtn')?.addEventListener('click', () => { quietRandomize(); navigateExercise(-1); });
-  document.getElementById('nextExerciseBtn')?.addEventListener('click', () => { quietRandomize(); navigateExercise(1);  });
-
-  // ===== Playlist flow =====
-  function startPlaylist(playlistId) {
-    currentPlaylist = playlists[playlistId];
-    currentPlaylistItemIndex = 0;
-    currentTempoIndex = 0;
-    currentRepetition = 0;
-    isPlayingPlaylist = true;
-
-    document.body.classList.add('playlist-mode');
-
-    // Uncheck and lock both Autos, clear related fields + RESET INTERNALS
-    if (autoRandomizeToggle) { autoRandomizeToggle.checked = false; }
-    if (repsPerTempoInput)   { repsPerTempoInput.value = ''; repsPerTempoInput.disabled = true; }
-    if (minTempoInput)       { minTempoInput.value = ''; minTempoInput.disabled = true; }
-    if (maxTempoInput)       { maxTempoInput.value = ''; maxTempoInput.disabled = true; }
-    resetRandomizeInternals();
-
-    if (autoTempoStepToggle) { autoTempoStepToggle.checked = false; }
-    if (dialRepsInput)       { dialRepsInput.value = ''; dialRepsInput.disabled = true; }
-    if (dialStepInput)       { dialStepInput.value = ''; dialStepInput.disabled = true; }
-    if (bumpTempoBtn)        { bumpTempoBtn.disabled = true; }
-    resetTempoStepInternals();
-    prevTempo = null;
-
-    // Force Category to "All Categories" and lock it during playlist
-    if (categorySearchInput) {
-      categorySearchInput.value = '';
-      categorySearchInput.placeholder = 'All Categories';
-      categorySearchInput.dataset.id = 'all';
-      categorySearchInput.disabled = true;
-    }
-
-    // Lock other controls
-    if (randomExerciseBtn)     randomExerciseBtn.disabled     = true;
-    if (randomTempoBtn)        randomTempoBtn.disabled        = true;
-    if (autoRandomizeToggle)   autoRandomizeToggle.disabled   = true;
-
-    // Keep slider LOOK the same but make it non-interactive
-    if (tempoSlider) {
-      tempoSlider.setAttribute('aria-disabled','true');
-      tempoSlider.classList.add('is-disabled');
-    }
-
-    const autoLabelFirst = document.querySelector('.auto-label');
-    if (autoLabelFirst) autoLabelFirst.classList.add('disabled');
-    const randomContainerFirst = getOriginalRandomContainer();
-    if (randomContainerFirst) randomContainerFirst.classList.add('disabled');
-    lockTempoStepGroup(true);
-
-    if (prevPlaylistItemBtn) prevPlaylistItemBtn.disabled = false;
-    if (nextPlaylistItemBtn) nextPlaylistItemBtn.disabled = false;
-    if (stopPlaylistBtn)     stopPlaylistBtn.disabled     = false;
-
-    if (playlistQueueSearchInput) {
-      playlistQueueSearchInput.disabled = false;
-      playlistQueueSearchInput.removeAttribute('disabled');
-      playlistQueueSearchInput.style.opacity = '1';
-    }
-    if (playlistProgressContainer) playlistProgressContainer.style.display = 'block';
-
-    // Recompute lists under "All" and start playback
-    displayedExercises = filterExercisesForMode();
-    if (displayedExercises.length > 0) {
-      currentExerciseIndex    = 0;
-      currentSelectedExercise = displayedExercises[0];
-    }
-
-    updatePlaylistQueueDisplay();
-
-    // NEW: prefetch 1x durations for this playlist's exercises
-    prefetchExerciseDurationsForPlaylist();
-
-    playCurrentPlaylistItem();
-    applyLoopMode();
-  }
-
-  function prefetchExerciseDurationsForPlaylist() {
-    if (!currentPlaylist) return;
-    const uniqueIds = [...new Set(currentPlaylist.items.map(i => i.exerciseId))];
-    uniqueIds.forEach((id) => {
-      if (durationCache.has(id)) return;
-      const ex = exById.get(id);
-      if (!ex) return;
-      const url = resolveAssetUrl(ex.audioSrc);
-      const aud = new Audio();
-      aud.preload = 'metadata';
-      aud.src = url;
-      aud.addEventListener('loadedmetadata', () => {
-        if (isFinite(aud.duration) && aud.duration > 0) {
-          durationCache.set(id, aud.duration);
-          renderPlaylistOverlay(); // totals improve as metadata lands
-        }
-        // cleanup
-        aud.src = '';
-      }, { once: true });
-      aud.addEventListener('error', () => { /* ignore */ }, { once: true });
-    });
-  }
-
-  function playCurrentPlaylistItem() {
-    if (!currentPlaylist) return;
-    const item       = currentPlaylist.items[currentPlaylistItemIndex];
-    const exerciseId = item.exerciseId;
-    const exercise   = exercises.find(ex => ex.id === exerciseId);
-    if (!exercise) { console.error('Exercise not found: ' + exerciseId); return; }
-
-    currentSelectedExercise = exercise;
-    displayedExercises      = filterExercisesForMode();
-    currentExerciseIndex    = displayedExercises.indexOf(exercise);
-
-    if (exerciseSearchInput) {
-      exerciseSearchInput.value = '';
-      exerciseSearchInput.placeholder = exercise.name;
-      exerciseSearchInput.dataset.id = String(exercise.id);
-    }
-    initializeExercise(exercise);
-
-    const tempo = item.tempos[currentTempoIndex];
-    setTempoSilently(tempo); // slider visually same; input is non-interactive via aria-disabled
-
-    if (playlistQueueSearchInput) {
-      setSelectorValue(playlistQueueSearchInput, `${exercise.name} at ${tempo} BPM`, `${currentPlaylistItemIndex}-${currentTempoIndex}-${currentRepetition}`);
-    }
-
-    playExerciseRepetitions(item.repetitionsPerTempo);
-    updatePlaylistQueueDisplay();
-    updatePlaylistProgressBar();
-  }
-
-  function playExerciseRepetitions(repetitions) {
-    function playNextRepetition() {
-      if (!audio) return;
-      if (currentRepetition < repetitions) {
-        audio.currentTime = 0;
-        audio.onended = null;
-        audio.play();
-        if (playPauseBtn) playPauseBtn.textContent = 'Pause';
-        startProgressTicker();
-
-        audio.onended = function () {
-          currentRepetition++;
-          updatePlaylistQueueDisplay();
-          updatePlaylistProgressBar();
-          playNextRepetition();
-        };
-      } else {
-        currentTempoIndex++;
-        currentRepetition = 0;
-        if (currentTempoIndex >= currentPlaylist.items[currentPlaylistItemIndex].tempos.length) {
-          currentPlaylistItemIndex++;
-          currentTempoIndex = 0;
-          if (currentPlaylistItemIndex >= currentPlaylist.items.length) {
-            isPlayingPlaylist = false;
-            currentPlaylist = null;
-            stopPlaylist();
-            return;
-          }
-        }
-        updatePlaylistQueueDisplay();
-        updatePlaylistProgressBar();
-        playCurrentPlaylistItem();
-      }
-    }
-    playNextRepetition();
-  }
-
-  function stopPlaylist() {
-    if (audio) audio.pause();
-    isPlayingPlaylist = false;
-    currentPlaylist   = null;
-    if (playPauseBtn) playPauseBtn.textContent = 'Play';
-    resetPlaylistControls();
-    resetProgressBarInstant();
-
-    // Re-enable controls
-    if (categorySearchInput) categorySearchInput.disabled = false;
-    if (minTempoInput)      minTempoInput.disabled        = false;
-    if (maxTempoInput)      maxTempoInput.disabled        = false;
-    if (randomExerciseBtn)  randomExerciseBtn.disabled    = false;
-    if (randomTempoBtn)     randomTempoBtn.disabled       = false;
-    if (autoRandomizeToggle) autoRandomizeToggle.disabled = false;
-    if (repsPerTempoInput)  repsPerTempoInput.disabled    = false;
-
-    // Restore slider interactivity without changing look
-    if (tempoSlider) {
-      tempoSlider.removeAttribute('aria-disabled');
-      tempoSlider.classList.remove('is-disabled');
-    }
-
-    // Keep inputs visually cleared and ALSO reset internals again
-    if (autoRandomizeToggle) autoRandomizeToggle.checked = false;
-    if (repsPerTempoInput)   repsPerTempoInput.value = '';
-    if (minTempoInput)       minTempoInput.value = '';
-    if (maxTempoInput)       maxTempoInput.value = '';
-    resetRandomizeInternals();
-
-    if (autoTempoStepToggle) autoTempoStepToggle.checked = false;
-    if (dialRepsInput)       { dialRepsInput.value = ''; dialRepsInput.disabled = false; }
-    if (dialStepInput)       { dialStepInput.value = ''; dialStepInput.disabled = false; }
-    if (bumpTempoBtn)        { bumpTempoBtn.disabled = false; }
-    resetTempoStepInternals();
-    prevTempo = null;
-
-    // Random group visuals back
-    const autoLabelFirst = document.querySelector('.auto-label');
-    if (autoLabelFirst) autoLabelFirst.classList.remove('disabled');
-    const randomContainerFirst = getOriginalRandomContainer();
-    if (randomContainerFirst) randomContainerFirst.classList.remove('disabled');
-
-    // Tempo Step group back
-    lockTempoStepGroup(false);
-
-    document.body.classList.remove('playlist-mode');
-
-    // Reset queue field
-    if (playlistQueueSearchInput) {
-      playlistQueueSearchInput.value = '';
-      playlistQueueSearchInput.placeholder = 'Playlist Queue';
-      delete playlistQueueSearchInput.dataset.id;
-      playlistQueueSearchInput.disabled = true;
-      playlistQueueSearchInput.setAttribute('disabled','');
-    }
-
-    // Reset playlist selector to prompt text
-    if (playlistSearchInput) {
-      playlistSearchInput.value = '';
-      playlistSearchInput.placeholder = 'Select a Playlist';
-      delete playlistSearchInput.dataset.id;
-    }
-
-    // Reset Category to "All Categories"
-    if (categorySearchInput) {
-      categorySearchInput.value = '';
-      categorySearchInput.placeholder = 'All Categories';
-      categorySearchInput.dataset.id = 'all';
-    }
-
-    // Recompute exercises under "All" and sync exercise field
-    displayedExercises = filterExercisesForMode();
-    if (displayedExercises.length) {
-      if (!currentSelectedExercise || !displayedExercises.some(ex => ex.id === currentSelectedExercise.id)) {
-        currentSelectedExercise = displayedExercises[0];
-        initializeExercise(currentSelectedExercise);
-      }
-      if (exerciseSearchInput) {
-        exerciseSearchInput.value = '';
-        exerciseSearchInput.placeholder = currentSelectedExercise.name;
-        exerciseSearchInput.dataset.id = String(currentSelectedExercise.id);
-      }
-    } else {
-      currentSelectedExercise = null;
-      if (exerciseSearchInput) {
-        exerciseSearchInput.value = '';
-        exerciseSearchInput.placeholder = 'Search Exercises...';
-        delete exerciseSearchInput.dataset.id;
-      }
-    }
-
-    applyLoopMode();
-  }
-
-  function resetPlaylistControls() {
-    if (stopPlaylistBtn)            stopPlaylistBtn.disabled = true;
-    if (playlistQueueSearchInput)   playlistQueueSearchInput.disabled = true;
-    if (prevPlaylistItemBtn)        prevPlaylistItemBtn.disabled = true;
-    if (nextPlaylistItemBtn)        nextPlaylistItemBtn.disabled = true;
-    if (playPauseBtn)               playPauseBtn.textContent = 'Play';
-    if (playlistProgressContainer)  playlistProgressContainer.style.display = 'none';
-    updatePlaylistQueueDisplay();
-    updatePlaylistProgressBar();
-  }
-
-  function updatePlaylistQueueDisplay() {
-    playlistQueueMap = [];
-    if (!isPlayingPlaylist || !currentPlaylist) return;
-
-    currentPlaylist.items.forEach((item, i) => {
-      item.tempos.forEach((t, ti) => {
-        for (let r = 0; r < item.repetitionsPerTempo; r++) {
-          playlistQueueMap.push({ playlistItemIndex: i, tempoIndex: ti, repetition: r });
-        }
-      });
-    });
-  }
-
-  function getCurrentPlaylistQueueIndex() {
-    return playlistQueueMap.findIndex(pos =>
-      pos.playlistItemIndex === currentPlaylistItemIndex &&
-      pos.tempoIndex        === currentTempoIndex &&
-      pos.repetition        === currentRepetition
-    );
-  }
-
-  function updatePlaylistProgressBar() {
-    if (!playlistProgress || !playlistProgressPercentage) return;
-    if (!isPlayingPlaylist || !currentPlaylist || playlistQueueMap.length === 0) {
-      playlistProgress.style.width = '0%';
-      renderPlaylistOverlay();
-      return;
-    }
-    const currentIndex = getCurrentPlaylistQueueIndex();
-    const totalItems = playlistQueueMap.length;
-    const progressPercent = (currentIndex >= 0 && totalItems > 0)
-      ? ((currentIndex + 1) / totalItems) * 100
-      : 0;
-
-    playlistProgress.style.width = progressPercent + '%';
-
-    // Text shows time or percent based on toggle
-    renderPlaylistOverlay();
-  }
-
-  function syncPlaylistIndexToExercise(exerciseId) {
-    if (!currentPlaylist || !Array.isArray(currentPlaylist.items)) return;
-    const idx = currentPlaylist.items.findIndex(i => i.exerciseId === exerciseId);
-    if (idx >= 0) {
-      currentPlaylistItemIndex = idx;
-      currentTempoIndex = 0;
-      currentRepetition = 0;
-      updatePlaylistQueueDisplay();
-      updatePlaylistProgressBar();
-    }
-  }
-
-  function quietRandomize() {
-    currentRepCount = 0;
-    // Only clear the per-rep handler when NOT in playlist mode
-    if (audio && !isPlayingPlaylist) audio.onended = null;
-  }
-
-  // ===== Placeholders / initial ids =====
-  function initializeCategoryPlaceholder() {
-    if (categorySearchInput) {
-      categorySearchInput.placeholder = "All Categories";
-      categorySearchInput.dataset.id = 'all';
-    }
-  }
-  function initializePlaylistPlaceholder() {
-    if (playlistSearchInput) playlistSearchInput.placeholder = "Select a Playlist";
-  }
-
-  // ===== Picker overlay (no auto-focus; active item scrolls into view) =====
-  function showPicker({ theme = 'orange', title = 'Select', getItems, onSelect, getActiveId, getInitialIndex }) {
-    return new Promise((resolve) => {
-      pickerOverlay.classList.remove('picker--orange', 'picker--purple');
-      pickerOverlay.classList.add(theme === 'purple' ? 'picker--purple' : 'picker--orange');
-
-      pickerTitle.textContent = title;
-      pickerOverlay.hidden = false;
-      pickerOverlay.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-
-      pickerSearch.value = '';
-      pickerSearch.placeholder = 'Search...';
-
-      // Focus immediately so iOS shows the keyboard; desktop ready to type.
-      try {
-        pickerSearch.readOnly = false;
-        pickerSearch.focus({ preventScroll: true });
-        const L = pickerSearch.value.length;
-        pickerSearch.setSelectionRange(L, L);
-      } catch {}
-
-      let items = [];
-      let activeIndex = -1;
-
-      function computeInitialIndex() {
-        if (typeof getInitialIndex === 'function') {
-          const idx = getInitialIndex(items);
-          if (Number.isInteger(idx) && idx >= 0 && idx < items.length) return idx;
-        }
-        if (typeof getActiveId === 'function') {
-          const want = getActiveId();
-          if (want != null) {
-            const i = items.findIndex(it => String(it.id) === String(want));
-            if (i !== -1) return i;
-          }
-        }
-        return items.length ? 0 : -1;
-      }
-
-      function render() {
-        pickerList.innerHTML = '';
-        pickerOverlay.classList.toggle('picker--no-results', items.length === 0);
-        if (!items.length) return;
-
-        activeIndex = Math.max(0, Math.min(activeIndex, items.length - 1));
-
-        items.forEach((it, i) => {
-          const li = document.createElement('li');
-          li.className = 'picker__item' + (i === activeIndex ? ' is-active' : '');
-          li.setAttribute('role', 'option');
-          li.dataset.idx = i;
-          li.textContent = it.label;
-          li.style.touchAction = 'manipulation';
-
-          let startX=0, startY=0, moved=false;
-          const THRESH = 8;
-
-          li.addEventListener('touchstart', (e) => {
-            const t = e.touches && e.touches[0];
-            if (!t) return;
-            startX = t.clientX; startY = t.clientY; moved = false;
-          }, { passive: true });
-
-          li.addEventListener('touchmove', (e) => {
-            const t = e.touches && e.touches[0];
-            if (!t) return;
-            if (Math.abs(t.clientX - startX) > THRESH || Math.abs(t.clientY - startY) > THRESH) moved = true;
-          }, { passive: true });
-
-          li.addEventListener('touchend', (e) => {
-            if (!moved) {
-              e.preventDefault();
-              choose(i);
-            }
-          }, { passive: false });
-
-          li.addEventListener('click', () => choose(i));
-          li.addEventListener('contextmenu', (e) => e.preventDefault());
-
-          pickerList.appendChild(li);
-        });
-
-        if (activeIndex >= 0) {
-          const el = pickerList.querySelector(`[data-idx="${activeIndex}"]`);
-          if (el) el.scrollIntoView({ block: 'nearest' });
-        }
-      }
-
-      function refresh() {
-        const q = pickerSearch.value.trim().toLowerCase();
-        items = getItems(q);
-        activeIndex = computeInitialIndex();
-        render();
-      }
-
-      function choose(i) {
-        const it = items[i];
-        cleanup();
-        onSelect?.(it);
-        resolve(it || null);
-      }
-
-      function close() {
-        cleanup();
-        resolve(null);
-      }
-
-      function onKey(e) {
-        if (!items.length) {
-          if (e.key === 'Escape') { e.preventDefault(); close(); }
-          return;
-        }
-        if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); render(); }
-        if (e.key === 'ArrowUp')   { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); render(); }
-        if (e.key === 'Enter')     { e.preventDefault(); choose(activeIndex); }
-        if (e.key === 'Escape')    { e.preventDefault(); close(); }
-      }
-
-      function onOverlayClick(e) {
-        if (e.target === pickerOverlay) close();
-      }
-
-      function cleanup() {
-        pickerOverlay.hidden = true;
-        pickerOverlay.setAttribute('aria-hidden', 'true');
-        pickerOverlay.classList.remove('picker--no-results');
-        pickerSearch.value = '';
-        pickerList.innerHTML = '';
-        document.body.classList.remove('modal-open');
-        pickerSearch.removeEventListener('input', refresh);
-        document.removeEventListener('keydown', onKey);
-        pickerOverlay.removeEventListener('click', onOverlayClick);
-        pickerClose.removeEventListener('click', close);
-        document.removeEventListener('selectionchange', clearSelection);
-      }
-
-      pickerSearch.addEventListener('input', refresh);
-      document.addEventListener('keydown', onKey);
-      pickerOverlay.addEventListener('click', onOverlayClick);
-      pickerClose.addEventListener('click', close);
-
-      const clearSelection = () => {
-        if (pickerOverlay.hidden) return;
-
-        // If caret/selection is in the search box, do nothing
-        const ae = document.activeElement;
-        if (ae && (ae === pickerSearch || ae.closest?.('.picker__search'))) return;
-
-        const sel2 = window.getSelection?.();
-        if (!sel2) return;
-
-        const anchor = sel2.anchorNode;
-        if (anchor) {
-          const node = anchor.nodeType === 3 ? anchor.parentNode : anchor;
-          if (node && (node === pickerSearch || node.closest?.('.picker__search'))) return;
-        }
-        if (sel2.rangeCount) sel2.removeAllRanges();
-      };
-      document.addEventListener('selectionchange', clearSelection, { passive: true });
-
-      refresh();
-    });
-  }
-
-  // ===== Specific pickers =====
-  function openCategoryPicker() {
-    showPicker({
-      theme: 'orange',
-      title: 'Select Category',
-      getItems: (q) => displayedCategories
-        .filter(cat => (categoryDisplayMap[cat] || cat).toLowerCase().includes(q))
-        .map(cat => ({ id: cat, label: categoryDisplayMap[cat] || cat })),
-      getActiveId: () => getSelectedCategory(),
-      onSelect: (it) => {
-        if (!it) return;
-        setSelectorValue(categorySearchInput, it.label, it.id);
-        if (isPlayingPlaylist) stopPlaylist();
-
-        currentExerciseIndex = 0;
-        const filtered = filterExercisesForMode();
-        if (filtered.length > 0) {
-          currentSelectedExercise = filtered[currentExerciseIndex];
-          initializeExercise(currentSelectedExercise);
-          if (exerciseSearchInput) {
-            exerciseSearchInput.value = '';
-            exerciseSearchInput.placeholder = currentSelectedExercise.name;
-            exerciseSearchInput.dataset.id = String(currentSelectedExercise.id);
-          }
-          if (audio) { audio.pause(); resetProgressBarInstant(); }
-          if (playPauseBtn) playPauseBtn.textContent = 'Play';
-        } else {
-          currentSelectedExercise = null;
-          if (exerciseSearchInput) {
-            exerciseSearchInput.value = '';
-            exerciseSearchInput.placeholder = "Search Exercises...";
-            delete exerciseSearchInput.dataset.id;
-          }
-        }
-      }
-    });
-  }
-
-  function openExercisePicker() {
-    showPicker({
-      theme: document.body.classList.contains('playlist-mode') ? 'purple' : 'orange',
-      title: 'Select Exercise',
-      getItems: (q) => {
-        // 1. Prepare Number Mapping (1 <-> One)
-        const numMap = {
-          '0':['zero'], '1':['one'], '2':['two'], '3':['three'], '4':['four'],
-          '5':['five'], '6':['six'], '7':['seven'], '8':['eight'], '9':['nine'],
-          '10':['ten'], '11':['eleven'], '12':['twelve']
-        };
-        // Add reverse mapping (One -> 1)
-        Object.entries(numMap).forEach(([digit, words]) => {
-          words.forEach(w => { if(!numMap[w]) numMap[w] = []; numMap[w].push(digit); });
-        });
-
-        // 2. Create Search "Groups"
-        // e.g. "5 stroke" -> [ ["5", "five"], ["stroke"] ]
-        const terms = q.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-        const searchGroups = terms.map(term => {
-          const synonyms = numMap[term] || [];
-          return [term, ...synonyms];
-        });
-
-        return filterExercisesForMode()
-          .filter(ex => {
-            const name = ex.name.toLowerCase();
-            // Match if Name contains AT LEAST ONE version of EVERY typed term
-            return searchGroups.every(group => group.some(t => name.includes(t)));
-          })
-          .map(ex => ({ id: ex.id, label: ex.name, ex }));
-      },
-      getActiveId: () => currentSelectedExercise?.id ?? exerciseSearchInput?.dataset?.id ?? null,
-      onSelect: (it) => {
-        if (!it) return;
-        const exercise = it.ex || exercises.find(e => e.id === it.id);
-        if (!exercise) return;
-
-        currentSelectedExercise = exercise;
-        displayedExercises      = filterExercisesForMode();
-        currentExerciseIndex    = displayedExercises.findIndex(ex => ex.id === exercise.id);
-        initializeExercise(exercise);
-
-        if (exerciseSearchInput) {
-          exerciseSearchInput.value = '';
-          exerciseSearchInput.placeholder = exercise.name;
-          exerciseSearchInput.dataset.id = String(exercise.id);
-        }
-
-        if (isPlayingPlaylist && currentPlaylist) {
-          syncPlaylistIndexToExercise(exercise.id);
-          updatePlaylistQueueDisplay();
-          updatePlaylistProgressBar();
-          playCurrentPlaylistItem();
-        } else {
-          if (audio) { audio.pause(); resetProgressBarInstant(); }
-          if (playPauseBtn) playPauseBtn.textContent = 'Play';
-        }
-      }
-    });
-  }
-
-  function openPlaylistPicker() {
-    showPicker({
-      theme: 'purple',
-      title: 'Select Playlist',
-      getItems: (q) => displayedPlaylists
-        .filter(p => p.name.toLowerCase().includes(q))
-        .map(p => ({ id: p.index, label: p.name })),
-      getActiveId: () => {
-        if (currentPlaylist) return playlists.indexOf(currentPlaylist);
-        return getSelectorId(playlistSearchInput);
-      },
-      onSelect: (it) => {
-        if (!it) return;
-        if (isPlayingPlaylist) stopPlaylist();
-        startPlaylist(it.id);
-        setSelectorValue(playlistSearchInput, it.label, it.id);
-      }
-    });
-  }
-
-  function openQueuePicker() {
-    if (!isPlayingPlaylist || !currentPlaylist || playlistQueueMap.length === 0) return;
-    showPicker({
-      theme: 'purple',
-      title: 'Playlist Queue',
-      getItems: (q) => {
-        return playlistQueueMap.map(pos => {
-          const pItem = currentPlaylist.items[pos.playlistItemIndex];
-          const ex    = exercises.find(e => e.id === pItem.exerciseId);
-          const tempo = pItem.tempos[pos.tempoIndex];
-          const repIx = pos.repetition + 1;
-          const label = `${ex ? ex.name : 'Exercise'} at ${tempo} BPM (rep ${repIx}/${pItem.repetitionsPerTempo})`;
-          return { pos, label, id: `${pos.playlistItemIndex}-${pos.tempoIndex}-${pos.repetition}`, qText: `${(ex?.name||'').toLowerCase()} ${String(tempo)}` };
-        }).filter(vm => vm.qText.includes(q));
-      },
-      getActiveId: () => `${currentPlaylistItemIndex}-${currentTempoIndex}-${currentRepetition}`,
-      onSelect: (it) => {
-        if (!it) return;
-        const pos = it.pos;
-        currentPlaylistItemIndex = pos.playlistItemIndex;
-        currentTempoIndex        = pos.tempoIndex;
-        currentRepetition        = pos.repetition;
-        if (playlistQueueSearchInput) setSelectorValue(playlistQueueSearchInput, it.label, it.id);
-        updatePlaylistQueueDisplay();
-        updatePlaylistProgressBar();
-        playCurrentPlaylistItem();
-      }
-    });
-  }
-
-  // ===== Open pickers from inputs =====
-  function wireOpener(input, fn) {
-    if (!input) return;
-    try { input.readOnly = true; } catch {}
-    input.setAttribute('inputmode','none');
-
-    input.addEventListener('click', (e) => {
-      e.preventDefault();
-      fn();
-    });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        fn();
-      }
-    });
-  }
-
-  wireOpener(categorySearchInput, openCategoryPicker);
-  wireOpener(exerciseSearchInput, openExercisePicker);
-  wireOpener(playlistSearchInput, openPlaylistPicker);
-  wireOpener(playlistQueueSearchInput, openQueuePicker);
-
-  // Picker-list only: extra guards
-  if (pickerList){
-    pickerList.addEventListener('selectstart', (e) => e.preventDefault(), { passive:false });
-    pickerList.addEventListener('contextmenu', (e) => e.preventDefault());
-    pickerList.addEventListener('pointerdown', () => {
-      const sel3 = window.getSelection?.();
-      if (sel3 && sel3.removeAllRanges) sel3.removeAllRanges();
-    }, { passive:true });
-  }
-
-  // Playlist navigation buttons
-  stopPlaylistBtn?.addEventListener('click', function () { if (isPlayingPlaylist) stopPlaylist(); });
-  prevPlaylistItemBtn?.addEventListener('click', function () {
-    if (isPlayingPlaylist && playlistQueueMap.length > 0) {
-      let i = getCurrentPlaylistQueueIndex();
-      if (i > 0) {
-        i--;
-        const pos = playlistQueueMap[i];
-        currentPlaylistItemIndex = pos.playlistItemIndex;
-        currentTempoIndex        = pos.tempoIndex;
-        currentRepetition        = pos.repetition;
-        updatePlaylistQueueDisplay();
-        updatePlaylistProgressBar();
-        playCurrentPlaylistItem();
-      }
-    }
-  });
-  nextPlaylistItemBtn?.addEventListener('click', function () {
-    if (isPlayingPlaylist && playlistQueueMap.length > 0) {
-      let i = getCurrentPlaylistQueueIndex();
-      if (i < playlistQueueMap.length - 1) {
-        i++;
-        const pos = playlistQueueMap[i];
-        currentPlaylistItemIndex = pos.playlistItemIndex;
-        currentTempoIndex        = pos.tempoIndex;
-        currentRepetition        = pos.repetition;
-        updatePlaylistQueueDisplay();
-        updatePlaylistProgressBar();
-        playCurrentPlaylistItem();
-      }
-    }
-  });
-
-  /* ===== Mobile polish: keyboard-safe picker (header frozen) ===== */
-  (function(){
-    if (!pickerOverlay || !pickerList) return;
-    const header = pickerOverlay.querySelector('.picker__header');
-
-    function isOpen(){
-      return !pickerOverlay.hidden && pickerOverlay.getAttribute('aria-hidden') !== 'true';
-    }
-    function vvh(){ return (window.visualViewport && window.visualViewport.height) || window.innerHeight; }
-    function px(n){ return `${Math.max(120, Math.round(n))}px`; }
-
-    function updatePickerLayout(){
-      if (!isOpen()) return;
-      const cs = getComputedStyle(pickerOverlay);
-      const padTop    = parseFloat(cs.paddingTop)    || 0;
-      const padBottom = parseFloat(cs.paddingBottom) || 0;
-      const headerH   = header ? header.getBoundingClientRect().height : 0;
-      const gapBelowHeader = 10;
-      const usable = vvh() - padTop - padBottom - headerH - gapBelowHeader;
-      pickerList.style.maxHeight = px(usable);
-    }
-
-    let bound = false;
-    const vv = window.visualViewport;
-
-    function bind(){
-      if (bound) return;
-      bound = true;
-      updatePickerLayout();
-      window.addEventListener('orientationchange', updatePickerLayout);
-      if (vv){
-        vv.addEventListener('resize', updatePickerLayout);
-        vv.addEventListener('scroll', updatePickerLayout);
-      }
-      requestAnimationFrame(() => setTimeout(updatePickerLayout, 50));
-    }
-    function unbind(){
-      if (!bound) return;
-      bound = false;
-      window.removeEventListener('orientationchange', updatePickerLayout);
-      if (vv){
-        vv.removeEventListener('resize', updatePickerLayout);
-        vv.removeEventListener('scroll', updatePickerLayout);
-      }
-    }
-
-    const mo = new MutationObserver(() => (isOpen() ? bind() : unbind()));
-    mo.observe(pickerOverlay, { attributes:true, attributeFilter:['hidden','aria-hidden','class','style'] });
-
-    if (isOpen()) bind();
-  })();
-
-  // ===== Keyboard shortcuts: Space = Play/Pause; Arrows = tempo (±1, Shift=±5) =====
-  (function () {
-    const isTextInput = (el) => {
-      if (!el) return false;
-      const tag = (el.tagName || '').toLowerCase();
-      return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
-    };
-
-    const overlayOpen = () =>
-      !!(pickerOverlay && !pickerOverlay.hidden && pickerOverlay.getAttribute('aria-hidden') !== 'true');
-
-    function adjustTempo(delta) {
-      if (!tempoSlider) return;
-      // Respect disabled / aria-disabled (e.g., during playlist mode)
-      if (tempoSlider.disabled || tempoSlider.getAttribute('aria-disabled') === 'true') return;
-
-      const min = Number(tempoSlider.min || 0);
-      const max = Number(tempoSlider.max || 999);
-      const cur = Number(tempoSlider.value || 0);
-      const next = Math.max(min, Math.min(max, cur + delta));
-
-      if (next === cur) return;
-      setTempoSilently(next, { blur: true });
-      resetTempoStepCounter();
-    }
-
-    document.addEventListener(
-      'keydown',
-      (e) => {
-        // Ignore when typing or when picker modal is open
-        if (isTextInput(document.activeElement) || overlayOpen()) return;
-
-        // Space toggles play/pause
-        if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
-          e.preventDefault();
-          if (playPauseBtn) playPauseBtn.click();
-          return;
-        }
-
-        // Arrow keys adjust tempo (Shift = ±5)
-        const step = e.shiftKey ? 5 : 1;
-        if (e.key === 'ArrowUp' || e.key === 'ArrowRight') {
-          e.preventDefault();
-          adjustTempo(step);
-        } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') {
-          e.preventDefault();
-          adjustTempo(-step);
-        }
-      },
-      { passive: false }
-    );
-  })();
-
-  // ===== Click-to-toggle on playlist overlay / bar =====
-  function togglePlaylistOverlayMode() {
-    playlistOverlayMode = (playlistOverlayMode === 'time') ? 'percent' : 'time';
-    renderPlaylistOverlay();
-  }
-
-  // Make sure overlay can receive clicks (hardening if CSS was restrictive)
-  if (playlistTimeOverlay) {
-    try {
-      playlistTimeOverlay.style.pointerEvents = 'auto';
-      playlistTimeOverlay.style.cursor = 'pointer';
-      playlistTimeOverlay.style.userSelect = 'none';
-    } catch {}
-  }
-
-  // Click targets: whole playlist progress area + overlay text itself
-  [playlistProgressContainer, playlistTimeOverlay, playlistProgressPercentage].forEach((el) => {
-    if (!el) return;
-    el.addEventListener('click', (e) => {
+    shield.addEventListener('pointerdown', start, { passive:false });
+    shield.addEventListener('touchstart',  start, { passive:false });
+
+    // Block native jump-to-click if pointer hits the input itself
+    rangeEl.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      togglePlaylistOverlayMode();
+    }, { passive:false });
+  }
+  if (IS_IOS) installThumbOnlySlider(bpmRange); // keep BPM fix scoped to BPM slider
+
+  /* ---------------- Picker Modal ---------------- */
+  const pickerRoot  = $('#pickerRoot');
+  const pickerTitle = $('#pickerTitle');
+  const pickerClose = $('#pickerClose');
+  const pickerSearch= $('#pickerSearch');
+  const pickerList  = $('#pickerList');
+  let activeSelect = null, activeTrigger = null;
+
+  function openPicker(trigger, selectEl, titleText){
+    activeSelect = selectEl;
+    activeTrigger = trigger;
+    if (pickerTitle) pickerTitle.textContent = titleText || 'Select';
+    if (pickerSearch) pickerSearch.value = '';
+    renderPickerList('');
+    if (pickerRoot) pickerRoot.hidden = false;
+    document.body.classList.add('modal-open');
+    pickerSearch && pickerSearch.focus({preventScroll:true});
+  }
+  function closePicker(){
+    if (pickerRoot) pickerRoot.hidden = true;
+    document.body.classList.remove('modal-open');
+    activeSelect = null; activeTrigger = null;
+  }
+  function renderPickerList(filter){
+    if (!pickerList || !activeSelect) return;
+    pickerList.innerHTML = '';
+    const opts = [...activeSelect.options];
+    const q = (filter||'').trim().toLowerCase();
+
+    let added = 0;
+    opts.forEach((opt, idx)=>{
+      const txt = opt.text || opt.value;
+      if (q && !txt.toLowerCase().includes(q)) return;
+      const li = document.createElement('li');
+      li.className = 'picker__item' + (idx===activeSelect.selectedIndex ? ' is-active':'');
+      li.textContent = txt;
+      li.setAttribute('role','option');
+      li.addEventListener('click', ()=>{
+        activeSelect.value = opt.value || txt;
+        activeSelect.dispatchEvent(new Event('change', {bubbles:true}));
+        if (activeTrigger) activeTrigger.value = txt;
+        closePicker();
+      });
+      pickerList.appendChild(li);
+      added++;
     });
-    // prevent accidental text selection on pointerdown
-    el.addEventListener('pointerdown', (e) => {
-      if (e.button === 0) { e.preventDefault(); e.stopPropagation(); }
-    }, { passive: false });
-  });
 
-  // Initial paint of overlay (default = cumulative time)
-  renderPlaylistOverlay();
-
-
-// ===== Quality of Life: "Enter" key blurs inputs to confirm values =====
-  const numericInputs = [
-    repsPerTempoInput, minTempoInput, maxTempoInput,
-    dialRepsInput, dialStepInput
-  ];
-  
-  numericInputs.forEach(input => {
-    if (!input) return;
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        input.blur(); // Triggers the 'change'/'input' logic and restores keyboard shortcuts
+    // Hide list entirely if no matches
+    if (added === 0){
+      pickerList.hidden = true;
+      pickerList.style.display = 'none';
+    } else {
+      pickerList.hidden = false;
+      pickerList.style.display = '';
+    }
+  }
+  pickerClose && pickerClose.addEventListener('click', closePicker);
+  pickerSearch && pickerSearch.addEventListener('input', ()=> renderPickerList(pickerSearch.value));
+  function attachPicker(trigger){
+    const selectId = trigger.getAttribute('data-picker');
+    const title    = trigger.getAttribute('data-title') || 'Select';
+    const sel      = $('#'+selectId);
+    if (!sel) return;
+    trigger.value = sel.options[sel.selectedIndex]?.text || '';
+    trigger.addEventListener('click', ()=>{
+      if (pickerRoot && !pickerRoot.hidden && activeTrigger === trigger){
+        closePicker(); // toggle close if already open for this trigger
+      } else {
+        openPicker(trigger, sel, title);
       }
     });
+  }
+  [tsNumTrigger, tsDenTrigger, subdivTrigger, soundTrigger].forEach(el=> el && attachPicker(el));
+  // Click-outside-to-close (robust) + Esc
+  const PANEL_SELECTOR = '.picker__panel, .picker-panel, .picker, [role="dialog"], [data-panel], [data-modal-panel]';
+  function getPickerPanel(){
+    return pickerRoot ? pickerRoot.querySelector(PANEL_SELECTOR) : null;
+  }
+  // Close when clicking ANYWHERE not inside the panel
+  document.addEventListener('pointerdown', (e)=>{
+    if (!pickerRoot || pickerRoot.hidden) return;
+    const panel = getPickerPanel();
+    if (panel && panel.contains(e.target)) return; // inside -> ignore
+    closePicker(); // outside -> close
+  }, { capture:true });
+  // Esc to close
+  document.addEventListener('keydown', (e)=>{
+    if (e.key === 'Escape' && pickerRoot && !pickerRoot.hidden) closePicker();
   });
 
+  /* ---------------- Helpers ---------------- */
+
+  const EPS = 1e-6;
+  const clampInt = (v,min,max)=>Math.max(min,Math.min(max,(parseInt(v,10)||0)));
+  const getBpm = ()=>clampInt(bpmRange.value,0,400);
+
+  function getSubdivParts(){
+    const raw = (subdivSel?.value ?? '1/1').trim().replace(/\s+/g,'');
+    if (raw.includes('/')){
+      const [aStr,bStr] = raw.split('/');
+      const a = Number(aStr), b = Number(bStr);
+      return { a: (isFinite(a)?a:0), b: (isFinite(b)?b:1), raw };
+    }
+    const n = Number(raw);
+    return { a: (isFinite(n)?n:1), b: 1, raw };
+  }
+  function getSubdivRatio(){
+    const {a,b} = getSubdivParts();
+    if (b <= 0) return 0;
+    const r = a / b;
+    return r >= 0 ? r : 0;
+  }
+  function subsLightsCount(){
+    const {a} = getSubdivParts();
+    return Math.max(0, Math.floor(a));
+  }
+  function isQuartersSubdiv(){
+    const {a,b} = getSubdivParts();
+    return a === 1 && b === 1; // 1/1
+  }
+
+  /* ---------------- Main lights (0 none, 1 normal, 2 accent) ---------------- */
+  let beatStates = [];
+  function defaultBeatStates(){
+    const beats = clampInt(tsNum.value,1,12);
+    const arr = new Array(beats).fill(1);
+    if (beats>0) arr[0]=2;
+    return arr;
+  }
+
+  function renderLights(){
+    if (!lightsWrap) return;
+
+    lightsWrap.innerHTML = '';
+    const beats = clampInt(tsNum.value,1,12);
+    if (!beatStates.length || beatStates.length !== beats) beatStates = defaultBeatStates();
+
+    // Measure container and decide single-row vs two-row
+    const cw = lightsWrap.clientWidth || lightsWrap.getBoundingClientRect().width || 0;
+    const style = getComputedStyle(lightsWrap);
+    const gap = parseFloat(style.gap || '20') || 20;
+    const MIN_CELL = 28; // px
+
+    const fitsSingleRow = (count)=> {
+      if (count <= 0) return true;
+      const totalGaps = gap * Math.max(0, count-1);
+      const cellW = (cw - totalGaps) / count;
+      return cellW >= MIN_CELL;
+    };
+
+    const n = beats;
+
+    if (fitsSingleRow(n)){
+      const row = document.createElement('div');
+      row.className = 'main-row';
+      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
+      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
+      row.style.width = 'max-content';
+      row.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'metro-light';
+        applyBeatClass(d, beatStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          beatStates[i] = (beatStates[i] === 1) ? 2 : (beatStates[i] === 2 ? 0 : 1);
+          applyBeatClass(d, beatStates[i]);
+        });
+        row.appendChild(d);
+      }
+      lightsWrap.appendChild(row);
+    } else {
+      let topCount    = Math.ceil(n/2);
+      let bottomCount = n - topCount;
+
+      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
+      if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
+      if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
+
+      const maxCount = Math.max(topCount, bottomCount);
+      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
+
+      const rowTop = document.createElement('div');
+      rowTop.className = 'main-row';
+      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
+      rowTop.style.width = 'max-content';
+      rowTop.style.marginInline = 'auto';
+
+      const rowBottom = document.createElement('div');
+      rowBottom.className = 'main-row';
+      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
+      rowBottom.style.width = 'max-content';
+      rowBottom.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'metro-light';
+        applyBeatClass(d, beatStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          beatStates[i] = (beatStates[i] === 1) ? 2 : (beatStates[i] === 2 ? 0 : 1);
+          applyBeatClass(d, beatStates[i]);
+        });
+        (i < topCount ? rowTop : rowBottom).appendChild(d);
+      }
+
+      lightsWrap.appendChild(rowTop);
+      lightsWrap.appendChild(rowBottom);
+    }
+  }
+
+  function applyBeatClass(el, state){
+    el.classList.remove('is-accent','is-beat','is-muted','is-hit');
+    if (state===2) el.classList.add('is-accent');
+    else if (state===1) el.classList.add('is-beat');
+    else el.classList.add('is-muted');
+  }
+
+  /* ---------------- Sub lights (0 none, 1 normal, 2 accent) ---------------- */
+  let subStates = [];
+  function defaultSubStates(n){ return new Array(Math.max(0, n|0)).fill(1); }
+
+  function renderSubLights(){
+    if (!subLightsWrap) return;
+
+    // Quarters: hide lights (audio is also disabled in scheduler)
+    if (isQuartersSubdiv()){
+      subLightsWrap.hidden = true;
+      subLightsWrap.innerHTML = '';
+      subStates = [];
+      return;
+    }
+
+    const n = subsLightsCount();
+    if (n <= 0){
+      subLightsWrap.hidden = true;
+      subLightsWrap.innerHTML = '';
+      subStates = [];
+      return;
+    }
+    subLightsWrap.hidden = false;
+
+    if (!subStates.length || subStates.length !== n) subStates = defaultSubStates(n);
+
+    const cw = subLightsWrap.clientWidth || subLightsWrap.getBoundingClientRect().width || 0;
+    const style = getComputedStyle(subLightsWrap);
+    const gap = parseFloat(style.gap || '20') || 20;
+    const MIN_CELL = 28;
+
+    const fitsSingleRow = (count)=> {
+      if (count <= 0) return true;
+      const totalGaps = gap * Math.max(0, count-1);
+      const cellW = (cw - totalGaps) / count;
+      return cellW >= MIN_CELL;
+    };
+
+    subLightsWrap.innerHTML = '';
+
+    if (fitsSingleRow(n)){
+      const row = document.createElement('div');
+      row.className = 'sub-row';
+      const cellPx = Math.floor((cw - gap * Math.max(0, n-1)) / n);
+      row.style.gridTemplateColumns = `repeat(${n}, ${cellPx}px)`;
+      row.style.width = 'max-content';
+      row.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'sub-light';
+        applySubClass(d, subStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
+          applySubClass(d, subStates[i]);
+        });
+        row.appendChild(d);
+      }
+      subLightsWrap.appendChild(row);
+
+    } else {
+      let topCount    = Math.ceil(n/2);
+      let bottomCount = n - topCount;
+
+      const maxPerRow = Math.max(1, Math.floor((cw + gap) / (MIN_CELL + gap)));
+      if (topCount > maxPerRow)    { topCount = maxPerRow; bottomCount = n - topCount; }
+      if (bottomCount > maxPerRow) { bottomCount = maxPerRow; topCount   = n - bottomCount; }
+
+      const maxCount = Math.max(topCount, bottomCount);
+      const cellPx = Math.floor((cw - gap * Math.max(0, maxCount-1)) / maxCount);
+
+      const rowTop = document.createElement('div');
+      rowTop.className = 'sub-row';
+      rowTop.style.gridTemplateColumns = `repeat(${topCount}, ${cellPx}px)`;
+      rowTop.style.width = 'max-content';
+      rowTop.style.marginInline = 'auto';
+
+      const rowBottom = document.createElement('div');
+      rowBottom.className = 'sub-row';
+      rowBottom.style.gridTemplateColumns = `repeat(${bottomCount}, ${cellPx}px)`;
+      rowBottom.style.width = 'max-content';
+      rowBottom.style.marginInline = 'auto';
+
+      for (let i=0;i<n;i++){
+        const d = document.createElement('div');
+        d.className = 'sub-light';
+        applySubClass(d, subStates[i]);
+        d.title = 'Click: Normal → Accent → None';
+        d.addEventListener('click', ()=>{
+          subStates[i] = (subStates[i] === 1) ? 2 : (subStates[i] === 2 ? 0 : 1);
+          applySubClass(d, subStates[i]);
+        });
+        (i < topCount ? rowTop : rowBottom).appendChild(d);
+      }
+
+      subLightsWrap.appendChild(rowTop);
+      subLightsWrap.appendChild(rowBottom);
+    }
+  }
+
+  function applySubClass(el, state){
+    el.classList.remove('is-on','is-accent','is-muted','is-hit');
+    if (state===2) el.classList.add('is-accent');
+    else if (state===1) el.classList.add('is-on');
+    else el.classList.add('is-muted');
+  }
+
+  function pulseLight(beatIndex){
+    const lights = $$('.metro-light', lightsWrap);
+    lights.forEach((el,i)=>{
+      el.classList.toggle('is-hit', i===beatIndex);
+      if (i===beatIndex) setTimeout(()=>el.classList.remove('is-hit'), 60);
+    });
+  }
+  function pulseSubLightAt(i){
+    if (!subLightsWrap || subLightsWrap.hidden) return;
+    const lights = $$('.sub-light', subLightsWrap);
+    if (!lights.length) return;
+    const n = lights.length;
+    const idx = ((i % n) + n) % n;
+    if (subStates[idx] !== 0){
+      lights[idx].classList.add('is-hit');
+      setTimeout(()=>lights[idx].classList.remove('is-hit'), 60);
+    }
+  }
+  function clearHitClasses(){
+    $$('.metro-light', lightsWrap).forEach(el=>el.classList.remove('is-hit'));
+    if (subLightsWrap) $$('.sub-light', subLightsWrap).forEach(el=>el.classList.remove('is-hit'));
+  }
+
+  // Resize re-render
+  if ('ResizeObserver' in window){
+    if (lightsWrap){
+      const ro1 = new ResizeObserver(()=> renderLights());
+      ro1.observe(lightsWrap);
+    }
+    if (subLightsWrap){
+      const ro2 = new ResizeObserver(()=> renderSubLights());
+      ro2.observe(subLightsWrap);
+    }
+  } else {
+    window.addEventListener('resize', ()=>{ renderLights(); renderSubLights(); });
+  }
+
+  /* ---------------- Slider fill ---------------- */
+  function updateSliderFill(rangeEl){
+    if (!rangeEl) return;
+    const min = parseFloat(rangeEl.min||'0');
+    const max = parseFloat(rangeEl.max||'100');
+    const val = parseFloat(rangeEl.value||'0');
+    const pct = ((val-min)*100)/(max-min || 1);
+    rangeEl.style.setProperty('--bg-pos', pct+'% 100%');
+    // Use color by class; default purple, orange for .slider--orange
+    const color = rangeEl.classList.contains('slider--orange') ? 'var(--orange)' : 'var(--purple)';
+    rangeEl.style.background = `linear-gradient(to right, ${color} 0%, ${color} ${pct}%, var(--white) ${pct}%, var(--white) 100%)`;
+  }
+
+  /* ---------------- Audio ---------------- */
+  let audioCtx=null, master=null, __audioUnlocked=false;
+
+  // === LOUDNESS KNOBS (tweak these) ===
+  const HOT_MODE     = true;   // leave true for louder output
+  const DRIVE_DB     = 8;     // pre-clip drive (≈4x). Try 14–18 for more
+  const PRESENCE_DB  = 4;      // peaking EQ boost around 2.6 kHz
+  const HPF_HZ       = 110;    // high-pass to save headroom
+  const CLIP_K       = 2.4;    // soft-clip strength (tanh curve)
+  const MAKEUP_DB    = 0;      // post-clip makeup gain (≈2x)
+
+  // Utility
+  const dbToGain = db => Math.pow(10, db/20);
+
+  // Hot chain nodes
+  let hotPre=null, presence=null, hpf=null, clipper=null, hotPost=null;
+
+  function makeSoftClipCurve(k=3.5, n=65536){
+    const curve = new Float32Array(n);
+    for (let i=0;i<n;i++){
+      const x = (i/(n-1))*2 - 1; // -1..1
+      // soft clip using tanh, normalized
+      curve[i] = Math.tanh(k*x) / Math.tanh(k);
+    }
+    return curve;
+  }
+
+  function ensureCtx(){
+    if (!audioCtx){
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new Ctx({ latencyHint: 'interactive' });
+      } catch (_) { return; }
+
+      // Main mix bus
+      master = audioCtx.createGain();
+      master.gain.setValueAtTime(1.0, audioCtx.currentTime);
+
+      if (HOT_MODE){
+        hotPre   = audioCtx.createGain();
+        presence = audioCtx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2600;
+        presence.Q.value = 0.9;
+        presence.gain.value = PRESENCE_DB;
+
+        hpf = audioCtx.createBiquadFilter();
+        hpf.type = 'highpass';
+        hpf.frequency.value = HPF_HZ;
+        hpf.Q.value = 0.707;
+
+        clipper = audioCtx.createWaveShaper();
+        clipper.curve = makeSoftClipCurve(CLIP_K);
+        clipper.oversample = '4x';
+
+        hotPost = audioCtx.createGain();
+
+        // Gains
+        hotPre.gain.value  = dbToGain(DRIVE_DB);
+        hotPost.gain.value = dbToGain(MAKEUP_DB);
+
+        // Chain: master → pre → presence → HPF → clip → post → dest
+        master.connect(hotPre);
+        hotPre.connect(presence);
+        presence.connect(hpf);
+        hpf.connect(clipper);
+        clipper.connect(hotPost);
+        hotPost.connect(audioCtx.destination);
+      } else {
+        master.connect(audioCtx.destination);
+      }
+    }
+  }
+
+  // Pre-rendered click sample cache for oscillator presets (for crisp/identical hits)
+  let sampleCache = {}; // { presetName: { sr, accent:AudioBuffer, beat:..., sub:..., subAccent:... } }
+
+  function renderWaveSample(freq, shape, dur, sr){
+    const len = Math.max(1, Math.floor(dur * sr));
+    const data = new Float32Array(len);
+    const twoPI = Math.PI * 2;
+    const attack = Math.max(1, Math.floor(0.0008 * sr)); // ~0.8ms
+    const tConst = dur * 0.22; // decay constant
+    for (let i=0;i<len;i++){
+      const t = i / sr;
+      const phase = twoPI * freq * t;
+      let x;
+      switch (shape) {
+        case 'square':   x = Math.sign(Math.sin(phase)) || 1; break;
+        case 'triangle': x = 2/Math.PI * Math.asin(Math.sin(phase)); break;
+        case 'sawtooth': {
+          const frac = (freq * t) % 1;
+          x = 2 * frac - 1;
+          break;
+        }
+        default:         x = Math.sin(phase);
+      }
+      // fast-attack exponential decay envelope
+      const env = i < attack ? (i/attack) : Math.exp(-t / tConst);
+      data[i] = x * env;
+    }
+    const buf = (audioCtx ? audioCtx : { createBuffer:()=>null }).createBuffer?.(1, len, sr);
+    if (buf) buf.copyToChannel(data, 0);
+    return buf;
+  }
+
+  function ensurePresetSamples(){
+    if (!audioCtx) return;
+    const chosen = (soundSel?.value || 'beep');
+    if (!/^(beep|click|analog)$/.test(chosen)) return; // others use procedural (wood/clave)
+    const sr = audioCtx.sampleRate || 48000;
+    const cached = sampleCache[chosen];
+    if (cached && cached.sr === sr) return;
+
+    const p = presets[chosen] || presets.beep;
+    const out = { sr };
+    ['accent','beat','sub','subAccent'].forEach(k=>{
+      const spec = p[k] || p.beat;
+      const [freq, shape, dur] = spec;
+      // slightly longer to increase energy
+      const durBoost = (k==='accent'||k==='beat') ? 1.15 : 1.1;
+      out[k] = renderWaveSample(freq, shape || 'sine', dur*durBoost, sr);
+    });
+    sampleCache[chosen] = out;
+  }
+
+  // One-time unlock on first gesture (global)
+  function setupAudioUnlock(){
+    if (__audioUnlocked) return;
+    const events = ['pointerdown','keydown'];
+    const unlockOnce = () => {
+      gestureUnlock();
+      events.forEach(ev => document.removeEventListener(ev, unlockOnce, true));
+    };
+    events.forEach(ev => document.addEventListener(ev, unlockOnce, { capture:true, passive:true }));
+  }
+
+  function gestureUnlock(){
+    if (__audioUnlocked) return;
+    ensureCtx();
+    if (!audioCtx) return;
+
+    try { audioCtx.resume && audioCtx.resume(); } catch {}
+
+    try {
+      // iOS: 1-sample silent buffer opens the route
+      const b = audioCtx.createBuffer(1, 1, 22050);
+      const s = audioCtx.createBufferSource(); s.buffer = b; s.connect(master); s.start(0);
+
+      // Android: prime with a zero-gain ConstantSource (some WebViews need this)
+      if (audioCtx.createConstantSource){
+        const cs = audioCtx.createConstantSource();
+        const g  = audioCtx.createGain(); g.gain.value = 0.0;
+        cs.connect(g).connect(master); cs.start();
+        setTimeout(()=>{ try{ cs.stop(); }catch{} }, 30);
+      }
+    } catch {}
+
+    ensurePresetSamples();
+    __audioUnlocked = true;
+  }
+
+  const presets = {
+    beep: {
+      accent:[1760,'sine',0.020], beat:[880,'sine',0.018],
+      sub:[440,'sine',0.012], subAccent:[660,'triangle',0.014]
+    },
+    click: {
+      accent:[3000,'triangle',0.008], beat:[2500,'square',0.006],
+      sub:[2000,'square',0.004], subAccent:[2200,'sawtooth',0.006]
+    },
+    wood: {
+      accent:['wood',null,0.028], beat:['wood',null,0.022],
+      sub:['wood',null,0.016], subAccent:['wood-hi',null,0.018]
+    },
+    clave: {
+      accent:['clave',null,0.028], beat:['clave',null,0.020],
+      sub:['clave',null,0.014], subAccent:['clave-soft',null,0.016]
+    },
+    analog: {
+      accent:[1200,'sawtooth',0.020], beat:[900,'sawtooth',0.016],
+      sub:[700,'sawtooth',0.012], subAccent:[1000,'square',0.014]
+    },
+  };
+  const presetLevel = { beep:1.00, click:1.00, wood:1.00, clave:1.00, analog:1.00 };
+  const kindScale   = k => k==='accent'?1.0 : k==='beat'?0.8 : 0.6;
+
+  // === Volume state (Beat/Sub) ===
+let mainVol = 1.00; // affects accent/beat
+let subVol  = 0.80; // affects sub/subAccent
+
+// Map 0–100% to -60 dB … 0 dB (log curve). 1% is nearly inaudible.
+function sliderToLinear(v){
+  const tRaw = Number(v);
+  const t = Math.max(0, Math.min(100, isFinite(tRaw) ? tRaw : 0)) / 100;
+  if (t <= 0) return 0;
+  const MIN_DB = -60;                 // make this -70 or -80 for an even slower rise
+  const db = MIN_DB + (0 - MIN_DB) * t;
+  return Math.pow(10, db / 20);       // 10^(dB/20)
+}
+function updateMainVolFromUI(){
+    if (!mainVolRange) return;
+    mainVol = sliderToLinear(mainVolRange.value);
+    if (mainVolValue) mainVolValue.textContent = `${Math.round(Number(mainVolRange.value)||0)}%`;
+    updateSliderFill(mainVolRange);
+  }
+  function updateSubVolFromUI(){
+    if (!subVolRange) return;
+    subVol = sliderToLinear(subVolRange.value);
+    if (subVolValue) subVolValue.textContent = `${Math.round(Number(subVolRange.value)||0)}%`;
+    updateSliderFill(subVolRange);
+  }
+  if (mainVolRange) mainVolRange.addEventListener('input', updateMainVolFromUI);
+  if (subVolRange)  subVolRange.addEventListener('input',  updateSubVolFromUI);
+
+  function trigger(time, kind, gainMul=1){
+    const chosen = (soundSel?.value || 'beep');
+    const p = (presets[chosen] || presets.beep);
+    const spec = p[kind] || (kind==='subAccent' ? p.sub : null) || p.beat;
+    const [freq, shape, dur] = spec;
+    if (!audioCtx || !master) return;
+
+    const v = audioCtx.createGain();
+    v.gain.cancelScheduledValues(time);
+
+    // Apply group volume: mainVol for accent/beat, subVol for sub/subAccent
+    const groupVol = (kind==='accent' || kind==='beat') ? mainVol : subVol;
+    const base = gainMul * groupVol * kindScale(kind === 'subAccent' ? 'sub' : kind) * (presetLevel[chosen]||1);
+    v.gain.setValueAtTime(base, time);
+    v.connect(master);
+
+    // Use pre-rendered buffers for oscillator presets
+    const bank = sampleCache[chosen];
+    if (bank && bank[kind] instanceof AudioBuffer){
+      const src = audioCtx.createBufferSource();
+      src.buffer = bank[kind];
+      src.connect(v);
+      src.start(time);
+      return;
+    }
+
+    // Procedural for wood/clave
+    if (freq === 'wood' || freq === 'wood-hi'){
+      const n = Math.max(1, Math.floor(audioCtx.sampleRate * dur));
+      const buffer = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i=0;i<n;i++) data[i] = (Math.random()*2-1) * Math.exp(-i/(n*0.22));
+      const src = audioCtx.createBufferSource(); src.buffer = buffer;
+      const bp = audioCtx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = (freq === 'wood-hi') ? 2200 : 1550;
+      bp.Q.value = (freq === 'wood-hi') ? 4.0 : 3.2;
+      src.connect(bp).connect(v);
+      src.start(time);
+      return;
+    }
+    if (freq === 'clave' || freq === 'clave-soft'){
+      const o1 = audioCtx.createOscillator();
+      const o2 = audioCtx.createOscillator();
+      if (freq === 'clave'){
+        o1.type='square';   o1.frequency.setValueAtTime(2350, time);
+        o2.type='triangle'; o2.frequency.setValueAtTime(1180, time);
+      } else {
+        o1.type='triangle'; o1.frequency.setValueAtTime(2050, time);
+        o2.type='sine';     o2.frequency.setValueAtTime(980, time);
+      }
+      const g  = audioCtx.createGain();
+      g.gain.setValueAtTime(1.0, time);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+      o1.connect(g); o2.connect(g); g.connect(v);
+      o1.start(time); o2.start(time);
+      o1.stop(time + dur); o2.stop(time + dur);
+      return;
+    }
+
+    // Fallback oscillator path (if no buffer yet)
+    const osc = audioCtx.createOscillator();
+    const env = audioCtx.createGain();
+    osc.type = shape || 'sine';
+    osc.frequency.setValueAtTime(freq, time);
+    env.gain.setValueAtTime(1.0, time);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(env).connect(v);
+    osc.start(time);
+    osc.stop(time + dur);
+  }
+
+  /* ---------------- Scheduler (phase + reset) ---------------- */
+  let isRunning=false;
+  let currentBeatInBar=0;
+
+  let beatCounter=0;
+  let subCounter=0;
+
+  let nextBeatTime=0;
+  let nextSubTime=0;
+  let scheduleTimer=null;
+  let gridT0 = 0;
+
+  const lookaheadMs = 25;
+  const scheduleAheadTime = 0.12;
+
+  function secondsPerBeat(){
+    const bpm = getBpm();
+    const den = clampInt(tsDen.value,1,16);
+    return bpm>0 ? 60.0/bpm * (4/den) : Infinity;
+  }
+
+  function alignToGrid(resetToFirst=false){
+    if (!audioCtx) return;
+
+    const now   = audioCtx.currentTime;
+    const spb   = secondsPerBeat();
+    const ratio = getSubdivRatio();
+    const beatsPerBar = clampInt(tsNum.value,1,12);
+
+    if (resetToFirst){
+      gridT0 = now + 0.05;
+      beatCounter = 0;
+      subCounter  = 0;
+      currentBeatInBar = 0;
+
+      nextBeatTime = gridT0;
+      if (ratio > EPS && !isQuartersSubdiv()){
+        nextSubTime = gridT0;
+      } else {
+        nextSubTime = Infinity;
+      }
+
+      clearHitClasses();
+      return;
+    }
+
+    const anchor = gridT0 || (now + 0.05);
+
+    beatCounter = Math.ceil((now - anchor - EPS) / spb);
+    if (beatCounter < 0) beatCounter = 0;
+    nextBeatTime = anchor + beatCounter * spb;
+    currentBeatInBar = ((beatCounter % beatsPerBar) + beatsPerBar) % beatsPerBar;
+
+    if (ratio > EPS){
+      const subInterval = spb / ratio;
+      subCounter = Math.ceil((now - anchor - EPS) / subInterval);
+      if (subCounter < 0) subCounter = 0;
+      nextSubTime = anchor + subCounter * subInterval;
+    } else {
+      nextSubTime = Infinity;
+      subCounter  = 0;
+    }
+    clearHitClasses();
+  }
+
+  function schedule(){
+    const spb   = secondsPerBeat();
+    if (!isFinite(spb)) return;
+
+    const ratio     = getSubdivRatio();
+    const isQuarter = isQuartersSubdiv();
+
+    const subEnabled   = (ratio > EPS) && !isQuarter;
+    const subInterval  = subEnabled ? (spb / ratio) : Infinity;
+
+    const beatsPerBar  = clampInt(tsNum.value,1,12);
+    const anchor       = gridT0;
+    const horizon      = audioCtx.currentTime + scheduleAheadTime;
+
+    while (true){
+      nextBeatTime = anchor + beatCounter * spb;
+      if (nextBeatTime < audioCtx.currentTime - EPS){
+        beatCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / spb);
+        nextBeatTime = anchor + beatCounter * spb;
+      }
+
+      nextSubTime = subEnabled ? (anchor + subCounter * subInterval) : Infinity;
+      if (subEnabled && nextSubTime < audioCtx.currentTime - EPS){
+        subCounter = Math.ceil((audioCtx.currentTime - anchor - EPS) / subInterval);
+        nextSubTime = anchor + subCounter * subInterval;
+      }
+
+      const tNext = Math.min(nextBeatTime, nextSubTime);
+      if (tNext >= horizon) break;
+
+const coincide = subEnabled && Math.abs(nextBeatTime - nextSubTime) <= EPS;
+
+if (coincide){
+  const state = beatStates[currentBeatInBar] ?? 1;
+  if (state !== 0){
+    trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+    pulseLight(currentBeatInBar);
+  }
+  const lights = $$('.sub-light', subLightsWrap);
+  if (lights.length){
+    const visIdx = ((subCounter % lights.length) + lights.length) % lights.length;
+    const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+    if (s !== 0){
+      trigger(nextBeatTime, s === 2 ? 'subAccent' : 'sub', 0.45); // add sub on downbeat
+      pulseSubLightAt(visIdx);
+    }
+  }
+  beatCounter++;
+  currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+  subCounter++;
+  continue;
+}
 
 
+      if (nextBeatTime < nextSubTime){
+        const state = beatStates[currentBeatInBar] ?? 1;
+        if (state !== 0){
+          trigger(nextBeatTime, state===2 ? 'accent' : 'beat');
+          pulseLight(currentBeatInBar);
+        }
+        beatCounter++;
+        currentBeatInBar = (currentBeatInBar + 1) % beatsPerBar;
+        continue;
+      }
 
+      // Subdivision fires
+      if (subEnabled){
+        const lights = $$('.sub-light', subLightsWrap);
+        const visibleCount = lights.length || 1;
+        const visIdx = ((subCounter % visibleCount) + visibleCount) % visibleCount;
 
+        const s = subStates[visIdx] ?? 1; // 0 none, 1 normal, 2 accent
+        if (s === 2) trigger(nextSubTime, 'subAccent');
+        else if (s === 1) trigger(nextSubTime, 'sub');
+        pulseSubLightAt(visIdx);
+
+        subCounter++;
+      }
+    }
+  }
+
+  async function robustResume(){
+    ensureCtx();
+    if (!audioCtx) return false;
+    ensurePresetSamples();
+    try { await audioCtx.resume(); } catch {}
+    if (audioCtx.state !== 'running'){
+      try {
+        const b = audioCtx.createBuffer(1, 1, 22050);
+        const s = audioCtx.createBufferSource();
+        s.buffer = b; s.connect(master); s.start(0);
+      } catch {}
+      try { await audioCtx.resume(); } catch {}
+    }
+    return audioCtx.state === 'running';
+  }
+
+  /* ---------------- Transport ---------------- */
+  async function start(){
+    if (isRunning) return;
+    const ok = await robustResume();
+    if (!ok || getBpm() === 0) return;
+
+    // bring volume back up
+    if (audioCtx && master){
+      try{
+        master.gain.cancelScheduledValues(audioCtx.currentTime);
+        master.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.01);
+      }catch{}
+    }
+
+    isRunning = true;
+    if (playBtn){ playBtn.textContent = 'Stop'; playBtn.setAttribute('aria-pressed','true'); }
+
+    alignToGrid(true);
+    schedule();
+    if (scheduleTimer) clearInterval(scheduleTimer);
+    scheduleTimer = setInterval(schedule, lookaheadMs);
+  }
+
+  function stop(){
+    if (!isRunning) return;
+    clearInterval(scheduleTimer); scheduleTimer = null; isRunning = false;
+
+    // instant mute to kill tails
+    if (audioCtx && master){
+      try{
+        master.gain.cancelScheduledValues(audioCtx.currentTime);
+        master.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.005);
+      }catch{}
+    }
+
+    if (playBtn){ playBtn.textContent = 'Start'; playBtn.setAttribute('aria-pressed','false'); }
+    alignToGrid(true);
+  }
+
+  // Unified Play toggle
+  if (playBtn){
+    let lastToggleTs = 0;
+    const tooSoon = () => (performance.now() - lastToggleTs) < 260;
+
+    const toggle = async (e) => {
+      if (tooSoon()){ e.preventDefault(); e.stopPropagation(); return; }
+      lastToggleTs = performance.now();
+      e.preventDefault(); e.stopPropagation();
+
+      gestureUnlock();
+      await robustResume();
+      if (getBpm() === 0) return;
+
+      isRunning ? stop() : await start();
+    };
+
+    if (window.PointerEvent){
+      playBtn.addEventListener('pointerdown', () => { gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+      playBtn.addEventListener('pointerup',   toggle, { passive:false });
+      playBtn.addEventListener('click', (e)=>{
+        if (tooSoon()){ e.preventDefault(); e.stopPropagation(); }
+      }, { capture:true });
+    } else {
+      playBtn.addEventListener('touchstart', ()=>{ gestureUnlock(); ensurePresetSamples(); }, { passive:true });
+      playBtn.addEventListener('touchend',   toggle, { passive:false });
+      playBtn.addEventListener('click', (e)=>{
+        if (tooSoon()){ e.preventDefault(); e.stopPropagation(); }
+      }, { capture:true });
+    }
+  }
+
+  /* ---------------- Tap tempo ---------------- */
+  const TAP_RESET_MS = 1500;
+  let tapTimes = [];
+  function onTap(){
+    const nowTs = performance.now();
+    if (tapTimes.length && (nowTs - tapTimes[tapTimes.length - 1]) > TAP_RESET_MS) tapTimes = [];
+    tapTimes.push(nowTs);
+    if (tapTimes.length > 4) tapTimes.shift();
+    if (tapTimes.length === 4){
+      const [t0,t1,t2,t3] = tapTimes;
+      const ivals = [t1-t0, t2-t1, t3-t2].sort((a,b)=>a-b);
+      const ms = ivals[1];
+      const bpm = clampInt(Math.round(60000 / ms), 0, 400);
+      setBpmUI(bpm);
+      if (isRunning) alignToGrid(false);
+    }
+  }
+  tapBtn && tapBtn.addEventListener('click', onTap);
+
+  /* ---------------- UI sync ---------------- */
+  function setBpmUI(val){
+    const v = clampInt(val,0,400);
+    if (bpmRange)   bpmRange.value   = String(v);
+    if (bpmInput)   bpmInput.value   = String(v);
+    if (bpmDisplay) bpmDisplay.textContent = String(v);
+    if (bpmRange)   updateSliderFill(bpmRange);
+  }
+  function stepBpm(delta){
+    setBpmUI(getBpm() + delta);
+    if (isRunning){
+      if (getBpm()===0) { stop(); return; }
+      alignToGrid(false);
+    }
+  }
+
+  bpmDec1Btn && bpmDec1Btn.addEventListener('click', ()=>stepBpm(-1));
+  bpmDec5Btn && bpmDec5Btn.addEventListener('click', ()=>stepBpm(-5));
+  bpmInc1Btn && bpmInc1Btn.addEventListener('click', ()=>stepBpm(+1));
+  bpmInc5Btn && bpmInc5Btn.addEventListener('click', ()=>stepBpm(+5));
+
+  bpmRange && bpmRange.addEventListener('input', e=>{
+    setBpmUI(e.target.value);
+    if (isRunning){
+      if (getBpm()===0) { stop(); return; }
+      alignToGrid(false);
+    }
+  });
+  bpmInput && bpmInput.addEventListener('input', e=>{
+    setBpmUI(e.target.value||0);
+    if (isRunning) alignToGrid(false);
+  });
+
+  /* ---------------- Numerator auto-set rule ---------------- */
+  function autoSetNumeratorBySubdivision(){
+    const { b } = getSubdivParts();
+    let targetNum = null;
+    if (b === 3) targetNum = '3';
+    else if (b === 2) targetNum = '4';
+    if (targetNum && tsNum && tsNum.value !== targetNum){
+      tsNum.value = targetNum;
+      if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || targetNum;
+    }
+  }
+
+  // Setting changes
+  [tsNum, tsDen, subdivSel].forEach(el=> el && el.addEventListener('change', ()=>{
+    if (el === subdivSel){
+      if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+      autoSetNumeratorBySubdivision();
+    } else if (el === tsNum){
+      if (tsNumTrigger) tsNumTrigger.value = tsNum.options[tsNum.selectedIndex]?.text || '';
+    } else if (el === tsDen){
+      if (tsDenTrigger) tsDenTrigger.value = tsDen.options[tsDen.selectedIndex]?.text || '';
+    }
+
+    beatStates = defaultBeatStates();
+    renderLights();
+
+    const n = subsLightsCount();
+    subStates = n > 0 ? defaultSubStates(n) : [];
+    renderSubLights();
+
+    alignToGrid(true);
+  }));
+
+  soundSel && soundSel.addEventListener('change', ()=>{
+    if (soundTrigger) soundTrigger.value = soundSel.options[soundSel.selectedIndex]?.text || '';
+    ensurePresetSamples(); // update buffers for new preset
+    alignToGrid(true);
+  });
+
+  // Keyboard (Space toggle; arrows adjust BPM; Shift = ±5)
+  document.addEventListener('keydown', (e)=>{
+    if (pickerRoot && !pickerRoot.hidden) return;
+    const tag = (e.target.tagName||'').toLowerCase();
+    const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+    if (typing) return;
+
+    if (e.code === 'Space' && !e.altKey && !e.ctrlKey && !e.metaKey){
+      e.preventDefault(); e.stopPropagation();
+      isRunning ? stop() : start();
+      return;
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation();
+      stepBpm(e.shiftKey ? -5 : -1);
+    }
+  });
+  bpmRange && bpmRange.addEventListener('keydown', e=>{
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight'){
+      e.preventDefault(); e.stopPropagation(); stepBpm(e.shiftKey ? +5 : +1);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft'){
+      e.preventDefault(); e.stopPropagation(); stepBpm(e.shiftKey ? -5 : -1);
+    }
+  });
+
+  /* ---------------- Init ---------------- */
+  const defaults = {
+    bpm:120, tsNum:'4', tsDen:'4', subdiv:'1/1', sound:'beep',
+    mainVol: 100, // Beat volume default now 100%
+    subVol : 70
+  };
+
+  function applyDefaultsOnLoad(){
+    setBpmUI(defaults.bpm);
+    if (tsNum)     tsNum.value     = defaults.tsNum;
+    if (tsDen)     tsDen.value     = defaults.tsDen;
+    if (subdivSel) subdivSel.value = defaults.subdiv;   // quarters
+    if (soundSel)  soundSel.value  = defaults.sound;
+    if (bpmRange)  updateSliderFill(bpmRange);
+
+    // Volume sliders
+    if (mainVolRange){ mainVolRange.value = String(defaults.mainVol); updateMainVolFromUI(); }
+    if (subVolRange){  subVolRange.value  = String(defaults.subVol);  updateSubVolFromUI();  }
+
+    beatStates = defaultBeatStates();
+    renderLights();
+
+    const n = subsLightsCount();
+    subStates = n > 0 ? defaultSubStates(n) : [];
+    renderSubLights();
+
+    if (tsNumTrigger)  tsNumTrigger.value  = tsNum.options[tsNum.selectedIndex]?.text || '';
+    if (tsDenTrigger)  tsDenTrigger.value  = tsDen.options[tsDen.selectedIndex]?.text || '';
+    if (subdivTrigger) subdivTrigger.value = subdivSel.options[subdivSel.selectedIndex]?.text || '';
+    if (soundTrigger)  soundTrigger.value  = soundSel.options[soundSel.selectedIndex]?.text || '';
+
+    ensureCtx(); if (audioCtx) ensurePresetSamples();
+
+    alignToGrid(true); // start at first; quarters have no sub audio
+  }
+
+  [bpmRange,bpmInput,tsNum,tsDen,subdivSel,soundSel].forEach(el=>{ el && el.setAttribute('autocomplete','off'); });
+  window.addEventListener('pageshow', (e)=>{ if (e.persisted) applyDefaultsOnLoad(); });
+
+  setupAudioUnlock(); // global unlock
+  document.addEventListener('visibilitychange', ()=>{
+    if (document.visibilityState === 'visible' && audioCtx && audioCtx.state !== 'running'){
+      try { audioCtx.resume(); } catch {}
+    }
+  });
+
+  applyDefaultsOnLoad();
 });
